@@ -7,7 +7,6 @@ import webbrowser
 import requests
 
 def run_backend():
-    """Run the backend FastAPI server"""
     print("Starting backend server...")
     try:
         from backend.api import start_server
@@ -16,9 +15,7 @@ def run_backend():
         print(f"Error starting backend server: {str(e)}")
 
 def run_frontend():
-    """Run the Streamlit frontend"""
     print("Starting frontend...")
-    # Çalışma dizinini ayarla (logo yolu için önemli)
     os.environ["CATBOT_ROOT"] = os.path.dirname(os.path.abspath(__file__))
     cmd = [sys.executable, "-m", "streamlit", "run", "frontend/app.py", "--server.port=8501", "--server.address=127.0.0.1"]
     subprocess.Popen(cmd)
@@ -39,15 +36,12 @@ def check_ollama_running():
         return False
 
 def main():
-    """Run the full application"""
     print("Starting CatBot application...")
     
-    # Check if Ollama is installed and running
     try:
         import ollama
         print("Ollama Python package is installed.")
         
-        # Check if Ollama service is running
         if check_ollama_running():
             print("Ollama service is running.")
             print("Checking for llama3 model...")
@@ -80,13 +74,10 @@ def main():
     backend_thread.daemon = True
     backend_thread.start()
     
-    # Wait a moment for the backend to start
     time.sleep(2)
     
-    # Start the frontend
     run_frontend()
     
-    # Open the browser
     webbrowser.open("http://localhost:8501")
     
     print("CatBot is running!")

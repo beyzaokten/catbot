@@ -8,7 +8,6 @@ import threading
 import time
 import subprocess
 
-# API URL configuration
 API_URL = "http://127.0.0.1:8000"
 
 try:
@@ -26,7 +25,6 @@ except Exception as e:
 print(f"Using API URL: {API_URL}")
 
 def message_input_component(placeholder="Mesajınızı yazın...", key=None):
-    # Create a unique key for this component
     component_key = f"msg_input_{key}" if key else "msg_input"
     
     #CSS for message input
@@ -167,7 +165,6 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             
             st.session_state.messages.append({"role": "user", "content": message.strip()})
             st.session_state.current_screen = "chat"
-            # Force immediate rerun to show chat screen
             st.rerun()
     
     return None
@@ -665,6 +662,39 @@ def get_models():
     except:
         return ["llama3"]
 
+def get_conversations():
+    """Get all conversations from API"""
+    try:
+        response = requests.get(f"{API_URL}/conversations")
+        if response.status_code == 200:
+            return response.json()["conversations"]
+        return []
+    except Exception as e:
+        print(f"Error getting conversations: {e}")
+        return []
+
+def get_conversation_messages(conversation_id):
+    """Get messages for a specific conversation"""
+    try:
+        response = requests.get(f"{API_URL}/conversations/{conversation_id}")
+        if response.status_code == 200:
+            return response.json()["messages"]
+        return []
+    except Exception as e:
+        print(f"Error getting conversation messages: {e}")
+        return []
+
+def create_conversation(title="New Conversation"):
+    """Create a new conversation"""
+    try:
+        response = requests.post(f"{API_URL}/conversations", params={"title": title})
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        print(f"Error creating conversation: {e}")
+        return None
+
 def send_message(message, history=None, model_name=None):
     
     # Global LLM instance
@@ -698,6 +728,7 @@ def send_message(message, history=None, model_name=None):
         print(f"Sending message to API: {message}")
         data = {
             "message": message,
+            "conversation_id": st.session_state.get('current_conversation_id'),
             "history": history,
             "model_name": model_name
         }
@@ -707,7 +738,14 @@ def send_message(message, history=None, model_name=None):
         
         print(f"API response status: {response.status_code}")
         if response.status_code == 200:
-            result = response.json()["response"]
+            response_data = response.json()
+            result = response_data["response"]
+            
+            # Update current conversation ID
+            if "conversation_id" in response_data:
+                st.session_state.current_conversation_id = response_data["conversation_id"]
+                print(f"Updated conversation ID: {response_data['conversation_id']}")
+            
             print(f"API response content: {result[:100]}...") 
             return result
         else:
@@ -727,6 +765,34 @@ def clear_chat_history():
     except:
         pass
 
+def load_conversations():
+    """Load conversations from API"""
+    conversations = get_conversations()
+    st.session_state.conversations = conversations
+    print(f"Loaded {len(conversations)} conversations")
+
+def load_conversation_messages(conversation_id):
+    """Load messages for a specific conversation"""
+    messages = get_conversation_messages(conversation_id)
+    
+    # Convert API format to frontend format
+    formatted_messages = []
+    for msg in messages:
+        formatted_messages.append({
+            "role": msg["role"],
+            "content": msg["content"]
+        })
+    
+    st.session_state.messages = formatted_messages
+    st.session_state.current_conversation_id = conversation_id
+    print(f"Loaded {len(messages)} messages for conversation {conversation_id}")
+
+def start_new_conversation():
+    """Start a new conversation"""
+    st.session_state.messages = []
+    st.session_state.current_conversation_id = None
+    print("Started new conversation")
+
 
 
 def process_message(user_input):
@@ -742,7 +808,6 @@ def process_message(user_input):
             model_name=st.session_state.get('current_model', 'llama3')
         )
         
-        # Add assistant response to chat
         st.session_state.messages.append({"role": "assistant", "content": response})
         print(f"Response added: {response}")
         
@@ -750,7 +815,6 @@ def process_message(user_input):
         error_msg = f"Error: {str(e)}"
         print(f"Error in process_message: {error_msg}")
         
-        # Add error message
         st.session_state.messages.append({"role": "assistant", "content": f"❌ {error_msg}"})
 
 def main():
@@ -791,6 +855,12 @@ def main():
     if 'messages' not in st.session_state:
         st.session_state.messages = []
     
+    if 'current_conversation_id' not in st.session_state:
+        st.session_state.current_conversation_id = None
+    
+    if 'conversations' not in st.session_state:
+        st.session_state.conversations = []
+    
     if 'current_model' not in st.session_state:
         st.session_state.current_model = "llama3"
     
@@ -798,12 +868,20 @@ def main():
         st.session_state.model_options = ["llama3"]
         
         def update_models():
-            time.sleep(2)  # Wait for API to start
+            time.sleep(2)  
             models = get_models()
             if models:
                 st.session_state.model_options = models
                 
         threading.Thread(target=update_models).start()
+    
+    # Load conversations directly (not in thread) if API is available
+    if api_status and len(st.session_state.conversations) == 0:
+        try:
+            load_conversations()
+            print(f"Loaded conversations on page load: {len(st.session_state.conversations)}")
+        except Exception as e:
+            print(f"Failed to load conversations: {e}")
     
     # Initialize thinking state
     if 'thinking' not in st.session_state:
@@ -832,12 +910,10 @@ def main():
             </div>
             """, unsafe_allow_html=True)
         
-        st.markdown("""
-        <div class="new-chat-btn">
-            <span>Begin a New Chat</span>
-            <span>+</span>
-        </div>
-        """, unsafe_allow_html=True)
+        # Begin New Chat button
+        if st.button("Begin a New Chat", key="new_chat_btn", use_container_width=True):
+            start_new_conversation()
+            st.rerun()
         
         # Arama kutusu
         st.markdown("""
@@ -849,39 +925,28 @@ def main():
         
         st.markdown('<div class="chat-history-title">Recent Chats</div>', unsafe_allow_html=True)
         
-        # Geçmiş konuşmalar konteynerı
-        st.markdown("""
-        <div class="chat-history-container">
-            <div class="chat-item">
-                <div>
-                    <span class="chat-icon">💬</span>
-                    <span>How can I increase the number...</span>
-                </div>
-                <span class="chat-options">⋯</span>
-            </div>
-            <div class="chat-item">
-                <div>
-                    <span class="chat-icon">💬</span>
-                    <span>What's the best approach to...</span>
-                </div>
-                <span class="chat-options">⋯</span>
-            </div>
-            <div class="chat-item">
-                <div>
-                    <span class="chat-icon">💬</span>
-                    <span>What's the best approach to...</span>
-                </div>
-                <span class="chat-options">⋯</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Real conversations from database
+        if st.session_state.conversations:
+            for conv in st.session_state.conversations:
+                # Truncate title for display
+                display_title = conv['title']
+                if len(display_title) > 30:
+                    display_title = display_title[:30] + "..."
+                
+                # Check if this is the current conversation
+                is_current = st.session_state.current_conversation_id == conv['id']
+                button_style = "🟢 " if is_current else "💬 "
+                
+                if st.button(f"{button_style}{display_title}", key=f"conv_{conv['id']}", use_container_width=True):
+                    load_conversation_messages(conv['id'])
+                    st.rerun()
+        else:
+            st.markdown('<div style="color: #888; padding: 10px; font-size: 12px;">No conversations yet</div>', unsafe_allow_html=True)
     
     # Ana içerik
     if len(st.session_state.messages) == 0:
-        # Karşılama ekranını göster
         welcome_screen(logo_base64)
     else:
-        # Mesajları göster
         chat_screen()
 
 def welcome_screen(logo_base64=""):
@@ -966,7 +1031,6 @@ def chat_screen():
     if 'messages' not in st.session_state:
         st.session_state.messages = []
     
-    # Model selection at the top - no extra spacing
     col1, col2, col3 = st.columns([1, 3, 1])
     with col1:
         st.selectbox(
@@ -1028,7 +1092,7 @@ def chat_screen():
     
     for i, message in enumerate(st.session_state.messages):
         if message["role"] == "assistant":
-            # Assistant message - left side with logo
+            # Assistant message 
             content_length = len(message["content"])
             if content_length < 50:
                 width_style = "max-width: 300px;"
@@ -1067,7 +1131,7 @@ def chat_screen():
             </div>
             """, unsafe_allow_html=True)
         else:
-            # User message - right side
+            # User message 
             st.markdown(f"""
             <div style="
                 display: flex;
@@ -1093,14 +1157,11 @@ def chat_screen():
             </div>
             """, unsafe_allow_html=True)
     
-    # Check if we need to process the last user message
     if (st.session_state.messages and 
         st.session_state.messages[-1]["role"] == "user"):
-        # Count user vs assistant messages to see if we need a response
         user_count = len([msg for msg in st.session_state.messages if msg["role"] == "user"])
         assistant_count = len([msg for msg in st.session_state.messages if msg["role"] == "assistant"])
         
-        # If user has more messages than assistant responses, we need to process
         if user_count > assistant_count:
             # Show thinking animation
             st.markdown(f"""
@@ -1131,7 +1192,6 @@ def chat_screen():
             process_message(last_user_message)
             st.rerun()
     
-    # Message input area at the bottom
     user_message = message_input_component(
         placeholder="Mesajınızı yazın...",
         key="chat"

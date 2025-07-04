@@ -107,7 +107,6 @@ class LLMModel:
             
         try:
             print(f"Getting response for: {human_input}")
-            # Format chat history
             chat_history = "\n".join([f"{msg['role'].capitalize()}: {msg['content']}" 
                                      for msg in self.history])
             
