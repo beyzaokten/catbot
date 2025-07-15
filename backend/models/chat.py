@@ -34,4 +34,20 @@ class ConversationWithMessagesResponse(BaseModel):
     title: str
     created_at: str
     updated_at: str
-    messages: List[Dict] 
+    messages: List[Dict]
+
+class FileResponse(BaseModel):
+    id: int
+    filename: str
+    file_size: int
+    mime_type: str
+    uploaded_at: str
+    conversation_id: Optional[int] = None
+
+class FileUploadResponse(BaseModel):
+    success: bool
+    message: str
+    file: Optional[FileResponse] = None
+
+class FileListResponse(BaseModel):
+    files: List[FileResponse] 

@@ -1,10 +1,15 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
+from fastapi.responses import FileResponse
 import uvicorn
+from typing import Optional, List
 from sqlalchemy.orm import Session
-from .models.chat import Message, ChatRequest, ChatResponse, ModelsResponse
+from .models.chat import Message, ChatRequest, ChatResponse, ModelsResponse, FileResponse as FileResponseModel, FileUploadResponse, FileListResponse
 from .services.llm_service import LLMModel
+from .services.file_service import FileService
 from .database.database import get_db, init_database
 from .repositories.chat_repository import ChatRepository
+from .repositories.file_repository import FileRepository
+from .database.models import Conversation, Message as DBMessage, File as DBFile
 
 app = FastAPI()
 
@@ -14,6 +19,7 @@ async def startup_event():
     print("✅ Database initialized")
 
 llm_model = LLMModel()
+file_service = FileService()
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, db: Session = Depends(get_db)):
@@ -49,6 +55,201 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
             conversation_id=conversation.id,
             message_id=assistant_message.id
         )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/upload", response_model=FileUploadResponse)
+async def upload_file(
+    file: UploadFile = File(...), 
+    conversation_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db)
+):
+    """Upload a file with optional conversation association"""
+    try:
+        file_repo = FileRepository(db)
+        
+        # Validate file
+        is_valid, validation_message = file_service.validate_file(file)
+        if not is_valid:
+            return FileUploadResponse(
+                success=False,
+                message=validation_message,
+                file=None
+            )
+        
+        # Save file to storage
+        file_path, file_hash, file_size = await file_service.save_file(file)
+        
+        
+        # Detect MIME type
+        import mimetypes
+        mime_type, _ = mimetypes.guess_type(file.filename)
+        mime_type = mime_type or file.content_type
+        
+        # Save file metadata to database
+        db_file = file_repo.create_file(
+            filename=file.filename,
+            file_path=file_path,
+            file_size=file_size,
+            mime_type=mime_type,
+            file_hash=file_hash,
+            conversation_id=conversation_id
+        )
+        
+        return FileUploadResponse(
+            success=True,
+            message="File uploaded successfully",
+            file=FileResponseModel(
+                id=db_file.id,
+                filename=db_file.filename,
+                file_size=db_file.file_size,
+                mime_type=db_file.mime_type,
+                uploaded_at=db_file.uploaded_at.isoformat(),
+                conversation_id=db_file.conversation_id
+            )
+        )
+        
+    except Exception as e:
+        import traceback
+        print(f"File upload error: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+
+@app.get("/files", response_model=FileListResponse)
+async def get_files(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+    """Get all uploaded files"""
+    try:
+        file_repo = FileRepository(db)
+        files = file_repo.get_all_files(skip=skip, limit=limit)
+        
+        file_list = [
+            FileResponseModel(
+                id=f.id,
+                filename=f.filename,
+                file_size=f.file_size,
+                mime_type=f.mime_type,
+                uploaded_at=f.uploaded_at.isoformat(),
+                conversation_id=f.conversation_id
+            )
+            for f in files
+        ]
+        
+        return FileListResponse(files=file_list)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/files/{file_id}", response_model=FileResponseModel)
+async def get_file_info(file_id: int, db: Session = Depends(get_db)):
+    """Get file information by ID"""
+    try:
+        file_repo = FileRepository(db)
+        file = file_repo.get_file(file_id)
+        
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        return FileResponseModel(
+            id=file.id,
+            filename=file.filename,
+            file_size=file.file_size,
+            mime_type=file.mime_type,
+            uploaded_at=file.uploaded_at.isoformat(),
+            conversation_id=file.conversation_id
+        )
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/files/{file_id}/download")
+async def download_file(file_id: int, db: Session = Depends(get_db)):
+    """Download a file"""
+    try:
+        file_repo = FileRepository(db)
+        file = file_repo.get_file(file_id)
+        
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Return file response
+        return FileResponse(
+            path=file.file_path,
+            filename=file.filename,
+            media_type=file.mime_type
+        )
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/files/{file_id}")
+async def delete_file(file_id: int, db: Session = Depends(get_db)):
+    """Delete a file"""
+    try:
+        file_repo = FileRepository(db)
+        file = file_repo.get_file(file_id)
+        
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Delete from storage
+        storage_deleted = await file_service.delete_file(file.file_path)
+        
+        # Delete from database
+        db_deleted = file_repo.delete_file(file_id)
+        
+        if not db_deleted:
+            raise HTTPException(status_code=500, detail="Failed to delete file from database")
+        
+        return {
+            "status": "success", 
+            "message": "File deleted successfully",
+            "storage_deleted": storage_deleted
+        }
+        
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/conversations/{conversation_id}/files", response_model=FileListResponse)
+async def get_conversation_files(conversation_id: int, skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+    """Get all files for a specific conversation"""
+    try:
+        file_repo = FileRepository(db)
+        files = file_repo.get_files_by_conversation(conversation_id, skip=skip, limit=limit)
+        
+        file_list = [
+            FileResponseModel(
+                id=f.id,
+                filename=f.filename,
+                file_size=f.file_size,
+                mime_type=f.mime_type,
+                uploaded_at=f.uploaded_at.isoformat(),
+                conversation_id=f.conversation_id
+            )
+            for f in files
+        ]
+        
+        return FileListResponse(files=file_list)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/supported-file-types")
+async def get_supported_file_types():
+    """Get list of supported file types"""
+    try:
+        supported_types = file_service.get_supported_types()
+        return {
+            "supported_types": supported_types,
+            "max_file_size": file_service.MAX_FILE_SIZE,
+            "max_file_size_mb": file_service.MAX_FILE_SIZE / (1024 * 1024)
+        }
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

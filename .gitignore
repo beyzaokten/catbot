@@ -1,0 +1,47 @@
+# Database content files only
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Upload content files only
+uploads/files/
+uploads/*.txt
+uploads/*.pdf
+uploads/*.docx
+uploads/*.doc
+uploads/*.json
+uploads/*.xml
+uploads/*.csv
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+venv/
+env/
+.env
+.venv
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test files
+test_*.txt
+example.txt 

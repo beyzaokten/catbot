@@ -7,6 +7,8 @@ import json
 import threading
 import time
 import subprocess
+import html
+from typing import Optional, List
 
 API_URL = "http://127.0.0.1:8000"
 
@@ -16,19 +18,96 @@ try:
     sys.path.append(backend_path)
     from llm_model import LLMModel
     DIRECT_LLM = True
-    print("Using direct LLM connection (no backend API)")
 except Exception as e:
-    print(f"Direct LLM import failed: {e}")
     DIRECT_LLM = False
-    print("Will try to use backend API")
 
-print(f"Using API URL: {API_URL}")
+def upload_file_to_backend(uploaded_file, conversation_id: Optional[int] = None):
+    """Upload file to backend API"""
+    try:
+        files = {'file': (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+        data = {}
+        
+        # Only include conversation_id if it's not None to avoid foreign key issues
+        if conversation_id is not None:
+            data['conversation_id'] = conversation_id
+        
+        response = requests.post(f"{API_URL}/upload", files=files, data=data, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            error_text = response.text
+            try:
+                error_json = response.json()
+                error_detail = error_json.get('detail', error_text)
+            except:
+                error_detail = error_text
+            
+            return {
+                "success": False,
+                "message": f"HTTP {response.status_code}: {error_detail}"
+            }
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Connection error: {str(e)}"
+        }
+
+def get_conversation_files(conversation_id: int):
+    """Get files for a conversation"""
+    try:
+        response = requests.get(f"{API_URL}/conversations/{conversation_id}/files", timeout=10)
+        if response.status_code == 200:
+            return response.json().get("files", [])
+        return []
+    except Exception as e:
+        return []
+
+def delete_file_from_backend(file_id: int):
+    """Delete file from backend"""
+    try:
+        response = requests.delete(f"{API_URL}/files/{file_id}", timeout=10)
+        return response.status_code == 200
+    except Exception as e:
+        return False
+
+def get_supported_file_types():
+    """Get supported file types from backend"""
+    try:
+        response = requests.get(f"{API_URL}/supported-file-types", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("supported_types", []), data.get("max_file_size_mb", 10)
+        return [], 10
+    except Exception as e:
+        return [], 10
+
+def format_file_size(size_bytes: int) -> str:
+    """Format file size in human readable format"""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 def message_input_component(placeholder="Mesajınızı yazın...", key=None):
     component_key = f"msg_input_{key}" if key else "msg_input"
     
-    #CSS for message input
-    st.markdown("""
+    attach_logo_base64 = ""
+    try:
+        attach_logo_path = os.path.join("..", "assets", "attach_logo.png")
+        if not os.path.exists(attach_logo_path):
+            attach_logo_path = os.path.join("assets", "attach_logo.png")
+        if os.path.exists(attach_logo_path):
+            with open(attach_logo_path, "rb") as f:
+                attach_logo_base64 = base64.b64encode(f.read()).decode()
+    except Exception as e:
+        pass
+    
+    # CSS for message input with compact file upload styling
+    css_content = """
     <style>
         .message-input-container {
             position: fixed;
@@ -52,7 +131,6 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
         }
         
-        /* Override Streamlit textarea styling */
         .stTextArea > div > div > textarea {
             background: linear-gradient(135deg, rgba(138, 43, 226, 0.2), rgba(168, 168, 168, 0.2)) !important;
             border: 1px solid rgba(255, 255, 255, 0.3) !important;
@@ -113,12 +191,226 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.3) !important;
         }
         
+        /* Compact file upload button styling */
+        .compact-file-upload {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: 35px !important;
+            height: 35px !important;
+            border-radius: 50% !important;
+            background: rgba(138, 43, 226, 0.6) !important;
+            border: none !important;
+            color: white !important;
+            font-size: 16px !important;
+            cursor: pointer !important;
+            margin-right: 5px !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .compact-file-upload:hover {
+            background: rgba(138, 43, 226, 0.8) !important;
+            transform: scale(1.05) !important;
+        }
+        
+                /* File Uploader Styling */
+        .stFileUploader {
+            width: 45px !important;
+            height: 45px !important;
+            overflow: hidden !important;
+            position: relative !important;
+        }
+        
+        /* File uploader containers */
+        .stFileUploader > div,
+        .stFileUploader > div > div,
+        .stFileUploader > div > div > div,
+        .stFileUploader * {
+            width: 45px !important;
+            height: 45px !important;
+            min-width: 45px !important;
+            max-width: 45px !important;
+            min-height: 45px !important;
+            max-height: 45px !important;
+            border-radius: 50% !important;
+            background: transparent !important;
+            background-image: url('data:image/png;base64,{attach_logo_base64}') !important;
+            background-size: cover !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+            border: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            position: relative !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+            flex-shrink: 0 !important;
+            flex-grow: 0 !important;
+        }
+        
+        /* Hide text elements */
+        .stFileUploader label,
+        .stFileUploader p,
+        .stFileUploader span,
+        .stFileUploader small,
+        .stFileUploader button {
+            display: none !important;
+            visibility: hidden !important;
+        }
+        
+        /* File input positioning */
+        .stFileUploader input[type="file"] {
+            position: absolute !important;
+            width: 45px !important;
+            height: 45px !important;
+            opacity: 0 !important;
+            cursor: pointer !important;
+            border-radius: 50% !important;
+            z-index: 20 !important;
+            top: 0 !important;
+            left: 0 !important;
+        }
+        
+        /* Hover effects */
+        .stFileUploader:hover > div,
+        .stFileUploader:hover > div > div,
+        .stFileUploader:hover > div > div > div,
+        .stFileUploader:hover * {
+            transform: scale(1.1) !important;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3) !important;
+            filter: brightness(1.1) !important;
+        }
+        
+        /* Force hide dropzone specific elements */
+        .stFileUploader [data-testid="stFileUploadDropzone"] p,
+        .stFileUploader [data-testid="stFileUploadDropzone"] span,
+        .stFileUploader [data-testid="stFileUploadDropzoneInstructions"] {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+        }
+        
+        /* Circle enforcement */
+        .stFileUploader,
+        .stFileUploader > *,
+        .stFileUploader > * > *,
+        .stFileUploader > * > * > * {
+            border-radius: 50% !important;
+            -webkit-border-radius: 50% !important;
+            -moz-border-radius: 50% !important;
+            border-top-left-radius: 50% !important;
+            border-top-right-radius: 50% !important;
+            border-bottom-left-radius: 50% !important;
+            border-bottom-right-radius: 50% !important;
+            clip-path: circle(50%) !important;
+        }
+        
+        /* Square dimensions */
+        .stFileUploader,
+        .stFileUploader > *,
+        .stFileUploader > * > *,
+        .stFileUploader > * > * > * {
+            aspect-ratio: 1/1 !important;
+            width: 45px !important;
+            height: 45px !important;
+        }
+        
+        /* Hide drag text */
+        .stFileUploader > div > div > div {
+            display: none !important;
+        }
+        
+        .stFileUploader > div > div > p {
+            display: none !important;
+        }
+        
+        .stFileUploader > div > div > small {
+            display: none !important;
+        }
+        
+        .stFileUploader > div > div > span {
+            display: none !important;
+        }
+        
+        .stFileUploader > div > div > button {
+            display: none !important;
+        }
+        
+        /* Hide any text content in file uploader */
+        .stFileUploader * {
+            font-size: 0 !important;
+            text-indent: -9999px !important;
+        }
+        
+        /* Override text hiding for our custom icon */
+        .stFileUploader > div > div::before {
+            font-size: 16px !important;
+            text-indent: 0 !important;
+        }
+        
+        .uploaded-files {
+            background: rgba(138, 43, 226, 0.1);
+            border-radius: 8px;
+            padding: 8px;
+            margin-bottom: 10px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 5px 10px;
+            margin: 3px 0;
+            border-radius: 6px;
+            font-size: 12px;
+            color: white;
+        }
+        
+        .file-name {
+            flex: 1;
+            margin-right: 10px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .file-size {
+            color: rgba(255, 255, 255, 0.7);
+            margin-right: 10px;
+        }
+        
         .send-icon {
             color: white !important;
             font-size: 18px !important;
         }
+        
+        /* Small clear button styling */
+        .stButton > button[title="Tüm dosyaları temizle"] {
+            background: rgba(231, 76, 60, 0.7) !important;
+            border: none !important;
+            border-radius: 6px !important;
+            padding: 4px 8px !important;
+            font-size: 11px !important;
+            color: white !important;
+            height: 28px !important;
+            min-height: 28px !important;
+        }
+        
+        .stButton > button[title="Tüm dosyaları temizle"]:hover {
+            background: rgba(231, 76, 60, 0.9) !important;
+            transform: scale(1.02) !important;
+        }
     </style>
-    """, unsafe_allow_html=True)
+    """
+    
+    css_content = css_content.replace('{attach_logo_base64}', attach_logo_base64)
+    st.markdown(css_content, unsafe_allow_html=True)
     
     # Form container styling
     st.markdown("""
@@ -140,11 +432,55 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
     </style>
     """, unsafe_allow_html=True)
     
+    # Initialize file upload state
+    if f'uploaded_files_{component_key}' not in st.session_state:
+        st.session_state[f'uploaded_files_{component_key}'] = []
+    
+    # Get current conversation ID
+    current_conversation_id = getattr(st.session_state, 'current_conversation_id', None)
+    
+    if st.session_state[f'uploaded_files_{component_key}']:
+        st.markdown('<div class="uploaded-files">', unsafe_allow_html=True)
+        for idx, file_info in enumerate(st.session_state[f'uploaded_files_{component_key}']):
+            file_size_str = format_file_size(file_info['size'])
+            
+            st.markdown(
+                f'<div class="file-item">'
+                f'<span class="file-name" title="{file_info["name"]}">{file_info["name"]}</span>'
+                f'<span class="file-size">{file_size_str}</span>'
+                f'<span style="color: rgba(255,255,255,0.6);">📄</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([2, 1, 2])
+        with col2:
+            if st.button("🗑️ Temizle", key=f"clear_files_{component_key}", help="Tüm dosyaları temizle"):
+                # Clear files from backend
+                for file_info in st.session_state[f'uploaded_files_{component_key}']:
+                    delete_file_from_backend(file_info['id'])
+                # Clear from session state
+                st.session_state[f'uploaded_files_{component_key}'] = []
+                # Clear processed files tracking
+                processed_files_key = f'processed_files_{component_key}'
+                if processed_files_key in st.session_state:
+                    st.session_state[processed_files_key] = set()
+
     with st.form(key=f"chat_form_{component_key}", clear_on_submit=True):
-        # Create columns for input layout
-        col1, col2 = st.columns([0.9, 0.1])
+        col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
         
         with col1:
+            uploaded_file = st.file_uploader(
+                "",
+                type=['pdf', 'txt', 'md', 'docx', 'doc', 'html', 'rtf', 'csv', 'json', 'xml'],
+                help="Dosya ekle (PDF, TXT, MD, DOCX, DOC, HTML, RTF, CSV, JSON, XML - Max: 10MB)",
+                key=f"file_uploader_{component_key}",
+                label_visibility="hidden"
+            )
+        
+        with col2:
             # Message text area
             message = st.text_area(
                 label="Mesaj",
@@ -154,33 +490,109 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
                 label_visibility="collapsed"
             )
         
-        with col2:
+        with col3:
             # Submit button 
             submitted = st.form_submit_button("➤", help="Mesajı gönder")
+        
+        if uploaded_file is not None:
+            # Check if this file was already uploaded
+            file_key = f"{uploaded_file.name}_{uploaded_file.size}"
+            processed_files_key = f'processed_files_{component_key}'
+            
+            if processed_files_key not in st.session_state:
+                st.session_state[processed_files_key] = set()
+            
+            if file_key not in st.session_state[processed_files_key]:
+                # Mark as being processed
+                st.session_state[processed_files_key].add(file_key)
+                
+                with st.spinner("Dosya yükleniyor..."):
+                    try:
+                        upload_result = upload_file_to_backend(uploaded_file, current_conversation_id)
+                        
+                        if upload_result.get("success"):
+                            file_info = upload_result.get("file", {})
+                            st.session_state[f'uploaded_files_{component_key}'].append({
+                                'id': file_info.get('id'),
+                                'name': file_info.get('filename'),
+                                'size': file_info.get('file_size'),
+                                'type': file_info.get('mime_type')
+                            })
+                            st.success(f"✅ {uploaded_file.name} başarıyla yüklendi!")
+                        else:
+                            error_msg = upload_result.get('message', 'Bilinmeyen hata')
+                            st.error(f"❌ Yükleme hatası: {error_msg}")
+                            st.session_state[processed_files_key].discard(file_key)
+                    except Exception as e:
+                        st.error(f"❌ Yükleme hatası: {str(e)}")
+                        st.session_state[processed_files_key].discard(file_key)
         
         # Process message if submitted
         if submitted and message and message.strip():
             if 'messages' not in st.session_state:
                 st.session_state.messages = []
             
-            st.session_state.messages.append({"role": "user", "content": message.strip()})
+            clean_user_message = message.strip()
+            
+            llm_message = clean_user_message
+            
+            if st.session_state[f'uploaded_files_{component_key}']:
+                file_contents = []
+                for file_info in st.session_state[f'uploaded_files_{component_key}']:
+                    content = process_file_content(file_info)
+                    file_contents.append(content)
+                
+                if file_contents:
+                    # Prompt for LLM file analysis
+                    file_context = "\n\n=== FILE ATTACHMENT ANALYSIS ===\n"
+                    file_context += "USER HAS ATTACHED THE FOLLOWING FILE(S). ANALYZE THEM CAREFULLY:\n\n"
+                    file_context += "".join(file_contents)
+                    file_context += "\n=== ANALYSIS INSTRUCTIONS ===\n"
+                    file_context += "You are an expert document analyzer. Please:\n"
+                    file_context += "1. READ the entire file content thoroughly\n"
+                    file_context += "2. UNDERSTAND the context and main topics\n"
+                    file_context += "3. PROVIDE a comprehensive response based on the user's question\n"
+                    file_context += "4. REFERENCE specific details from the file when relevant\n"
+                    file_context += "5. If asked to summarize, provide key points and main concepts\n"
+                    file_context += "6. Maintain accuracy - only use information from the provided content\n"
+                    file_context += "7. Be thorough and informative in your analysis\n\n"
+                    file_context += "USER QUESTION: " + clean_user_message + "\n"
+                    file_context += "RESPOND based on the attached file content above.\n"
+                    llm_message = file_context
+            
+            # Add message to UI history with file attachment info
+            message_data = {
+                "role": "user", 
+                "content": clean_user_message,
+                "attachments": []
+            }
+            
+            # Add file attachment info if any
+            if st.session_state[f'uploaded_files_{component_key}']:
+                for file_info in st.session_state[f'uploaded_files_{component_key}']:
+                    message_data["attachments"].append({
+                        'name': file_info['name'],
+                        'size': file_info['size'],
+                        'type': file_info['type']
+                    })
+            
+            st.session_state.messages.append(message_data)
+            
+            st.session_state.last_llm_message = llm_message
+            
             st.session_state.current_screen = "chat"
+            
+            st.session_state[f'uploaded_files_{component_key}'] = []
+            
             st.rerun()
     
     return None
 
 def check_api_connection():
     try:
-        print("Checking API connection...")
         response = requests.get(f"{API_URL}/models", timeout=2)
-        if response.status_code == 200:
-            print("API connection successful")
-            return True
-        else:
-            print(f"API connection failed with status code: {response.status_code}")
-            return False
+        return response.status_code == 200
     except Exception as e:
-        print(f"API connection error: {str(e)}")
         return False
 
 st.set_page_config(
@@ -670,7 +1082,6 @@ def get_conversations():
             return response.json()["conversations"]
         return []
     except Exception as e:
-        print(f"Error getting conversations: {e}")
         return []
 
 def get_conversation_messages(conversation_id):
@@ -681,7 +1092,6 @@ def get_conversation_messages(conversation_id):
             return response.json()["messages"]
         return []
     except Exception as e:
-        print(f"Error getting conversation messages: {e}")
         return []
 
 def create_conversation(title="New Conversation"):
@@ -692,7 +1102,6 @@ def create_conversation(title="New Conversation"):
             return response.json()
         return None
     except Exception as e:
-        print(f"Error creating conversation: {e}")
         return None
 
 def send_message(message, history=None, model_name=None):
@@ -700,32 +1109,24 @@ def send_message(message, history=None, model_name=None):
     # Global LLM instance
     if 'llm_instance' not in st.session_state and DIRECT_LLM:
         try:
-            print("Initializing direct LLM connection...")
             st.session_state.llm_instance = LLMModel(model_name=model_name or "llama3")
-            print("Direct LLM initialized successfully")
         except Exception as e:
-            print(f"Failed to initialize direct LLM: {e}")
             st.session_state.llm_instance = None
     
     if DIRECT_LLM and st.session_state.get('llm_instance'):
         try:
-            print(f"Using direct LLM for message: {message}")
             response = st.session_state.llm_instance.get_response(message)
-            print(f"Direct LLM response received: {response[:100]}...")
             return response
         except Exception as e:
-            print(f"Direct LLM failed: {e}")
-            # Fall back to API
+            pass  # Fall back to API
     
     if not check_api_connection():
-        print("API connection failed")
         if DIRECT_LLM:
             return "Hem direkt LLM hem de Backend API bağlantısı başarısız. Lütfen Ollama'nın çalıştığından emin olun."
         else:
             return "Backend API'ye bağlanılamadı. Lütfen API'nin çalıştığından emin olun."
         
     try:
-        print(f"Sending message to API: {message}")
         data = {
             "message": message,
             "conversation_id": st.session_state.get('current_conversation_id'),
@@ -733,30 +1134,21 @@ def send_message(message, history=None, model_name=None):
             "model_name": model_name
         }
         
-        print(f"Using model: {model_name}")
         response = requests.post(f"{API_URL}/chat", json=data)
         
-        print(f"API response status: {response.status_code}")
         if response.status_code == 200:
             response_data = response.json()
             result = response_data["response"]
             
-            # Update current conversation ID
             if "conversation_id" in response_data:
                 st.session_state.current_conversation_id = response_data["conversation_id"]
-                print(f"Updated conversation ID: {response_data['conversation_id']}")
             
-            print(f"API response content: {result[:100]}...") 
             return result
         else:
             error_msg = f"API'den yanıt alınamadı. Hata kodu: {response.status_code}"
-            print(error_msg)
-            if response.text:
-                print(f"Response text: {response.text}")
             return error_msg
     except Exception as e:
         error_msg = f"Hata oluştu: {str(e)}"
-        print(f"Exception in send_message: {error_msg}")
         return error_msg
 
 def clear_chat_history():
@@ -769,7 +1161,6 @@ def load_conversations():
     """Load conversations from API"""
     conversations = get_conversations()
     st.session_state.conversations = conversations
-    print(f"Loaded {len(conversations)} conversations")
 
 def load_conversation_messages(conversation_id):
     """Load messages for a specific conversation"""
@@ -778,44 +1169,98 @@ def load_conversation_messages(conversation_id):
     # Convert API format to frontend format
     formatted_messages = []
     for msg in messages:
-        formatted_messages.append({
+        message_data = {
             "role": msg["role"],
-            "content": msg["content"]
-        })
+            "content": msg["content"],
+            "attachments": []  
+        }
+        formatted_messages.append(message_data)
     
     st.session_state.messages = formatted_messages
     st.session_state.current_conversation_id = conversation_id
-    print(f"Loaded {len(messages)} messages for conversation {conversation_id}")
 
 def start_new_conversation():
     """Start a new conversation"""
     st.session_state.messages = []
     st.session_state.current_conversation_id = None
-    print("Started new conversation")
-
-
 
 def process_message(user_input):
     """Process user message and get response from the model"""
     if not user_input:
         return
-        
-        print(f"Processing message: {user_input}")
+    
+    message_to_llm = st.session_state.get('last_llm_message', user_input)
+    
+    # Clear the stored LLM message after use
+    if 'last_llm_message' in st.session_state:
+        del st.session_state.last_llm_message
     
     try:
         response = send_message(
-            message=user_input,
+            message=message_to_llm,
             model_name=st.session_state.get('current_model', 'llama3')
         )
         
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        print(f"Response added: {response}")
+        st.session_state.messages.append({"role": "assistant", "content": response, "attachments": []})
         
     except Exception as e:
         error_msg = f"Error: {str(e)}"
-        print(f"Error in process_message: {error_msg}")
+        st.session_state.messages.append({"role": "assistant", "content": f"❌ {error_msg}", "attachments": []})
+
+def read_file_content(file_id: int):
+    """Read file content from backend"""
+    try:
+        response = requests.get(f"{API_URL}/files/{file_id}/download", timeout=15)
+        if response.status_code == 200:
+            return response.content
+        return None
+    except Exception as e:
+        return None
+
+def process_file_content(file_info: dict) -> str:
+    """Process file content and return text"""
+    try:
+        content = read_file_content(file_info['id'])
+        if not content:
+            return f"[Dosya okunamadı: {file_info['name']}]"
         
-        st.session_state.messages.append({"role": "assistant", "content": f"❌ {error_msg}"})
+        mime_type = file_info.get('type', '')
+        filename = file_info['name']
+        
+        # Text files
+        if mime_type.startswith('text/') or filename.endswith(('.txt', '.md', '.csv', '.json', '.xml', '.html')):
+            try:
+                text_content = content.decode('utf-8')
+                # Limit content length to prevent token overflow
+                if len(text_content) > 4000:
+                    text_content = text_content[:4000] + "\n... (dosya kesildi, çok uzun)"
+                return f"\n📄 DOSYA: {filename}\n📝 İÇERİK:\n{text_content}\n✅ DOSYA SONU\n"
+            except UnicodeDecodeError:
+                try:
+                    text_content = content.decode('latin1')
+                    if len(text_content) > 4000:
+                        text_content = text_content[:4000] + "\n... (dosya kesildi, çok uzun)"
+                    return f"\n📄 DOSYA: {filename}\n📝 İÇERİK:\n{text_content}\n✅ DOSYA SONU\n"
+                except:
+                    return f"\n\n[{filename}: Text olarak okunamadı - binary dosya olabilir]\n"
+        
+        # PDF files - basic info only for now
+        elif mime_type == 'application/pdf':
+            size_str = format_file_size(file_info['size'])
+            return f"\n\n[PDF Dosyası: {filename} ({size_str}) - İçerik henüz işlenemiyor, RAG sistemi gerekli]\n"
+        
+        # Office documents
+        elif 'word' in mime_type or filename.endswith(('.doc', '.docx')):
+            size_str = format_file_size(file_info['size'])
+            return f"\n\n[Word Dökümanı: {filename} ({size_str}) - İçerik henüz işlenemiyor, RAG sistemi gerekli]\n"
+        
+        # Other files
+        else:
+            size_str = format_file_size(file_info['size'])
+            return f"\n\n[Dosya: {filename} ({size_str}) - Bu dosya türü henüz desteklenmiyor]\n"
+            
+    except Exception as e:
+        return f"\n\n[Hata: {file_info['name']} işlenirken hata oluştu: {str(e)}]\n"
 
 def main():
     local_css()
@@ -879,15 +1324,12 @@ def main():
     if api_status and len(st.session_state.conversations) == 0:
         try:
             load_conversations()
-            print(f"Loaded conversations on page load: {len(st.session_state.conversations)}")
         except Exception as e:
-            print(f"Failed to load conversations: {e}")
+            pass
     
-    # Initialize thinking state
     if 'thinking' not in st.session_state:
         st.session_state.thinking = False
     
-    # Initialize user input
     if 'user_input' not in st.session_state:
         st.session_state.user_input = ""
     
@@ -1126,36 +1568,87 @@ def chat_screen():
                     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
                     {width_style}
                 ">
-                    {message["content"]}
+                    {html.escape(message["content"])}
                 </div>
             </div>
             """, unsafe_allow_html=True)
         else:
-            # User message 
-            st.markdown(f"""
-            <div style="
-                display: flex;
-                justify-content: flex-end;
-                margin-bottom: 15px;
-                padding-right: 10px;
-            ">
+            # User message - check if has attachments
+            has_attachments = message.get("attachments") and len(message["attachments"]) > 0
+            
+            if has_attachments:
+                # User message WITH attachments
+                attachments_html = '<div style="margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 8px;">'
+                for attachment in message["attachments"]:
+                    file_size_str = format_file_size(attachment['size'])
+                    attachments_html += f'''
+                    <div style="
+                        display: flex; 
+                        align-items: center; 
+                        margin-bottom: 4px;
+                        background: rgba(255,255,255,0.1);
+                        border-radius: 8px;
+                        padding: 4px 8px;
+                        font-size: 12px;
+                    ">
+                        <span style="margin-right: 6px;">📄</span>
+                        <span style="flex: 1; color: rgba(255,255,255,0.9);">{html.escape(attachment["name"])}</span>
+                        <span style="color: rgba(255,255,255,0.6); font-size: 10px;">{file_size_str}</span>
+                    </div>
+                    '''
+                attachments_html += '</div>'
+                
+                st.markdown(f"""
                 <div style="
-                    background: rgba(138, 43, 226, 0.4);
-                    backdrop-filter: blur(10px);
-                    border-radius: 18px 18px 4px 18px;
-                    padding: 12px 16px;
-                    color: white;
-                    font-size: 14px;
-                    line-height: 1.4;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-                    max-width: 70%;
-                    word-wrap: break-word;
-                    text-align: left;
+                    display: flex;
+                    justify-content: flex-end;
+                    margin-bottom: 15px;
+                    padding-right: 10px;
                 ">
-                    {message["content"]}
+                    <div style="
+                        background: rgba(138, 43, 226, 0.4);
+                        backdrop-filter: blur(10px);
+                        border-radius: 18px 18px 4px 18px;
+                        padding: 12px 16px;
+                        color: white;
+                        font-size: 14px;
+                        line-height: 1.4;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                        max-width: 70%;
+                        word-wrap: break-word;
+                        text-align: left;
+                    ">
+                        {html.escape(message["content"])}
+                        {attachments_html}
+                    </div>
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
+            else:
+                # User message WITHOUT attachments
+                st.markdown(f"""
+                <div style="
+                    display: flex;
+                    justify-content: flex-end;
+                    margin-bottom: 15px;
+                    padding-right: 10px;
+                ">
+                    <div style="
+                        background: rgba(138, 43, 226, 0.4);
+                        backdrop-filter: blur(10px);
+                        border-radius: 18px 18px 4px 18px;
+                        padding: 12px 16px;
+                        color: white;
+                        font-size: 14px;
+                        line-height: 1.4;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                        max-width: 70%;
+                        word-wrap: break-word;
+                        text-align: left;
+                    ">
+                        {html.escape(message["content"])}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
     
     if (st.session_state.messages and 
         st.session_state.messages[-1]["role"] == "user"):
