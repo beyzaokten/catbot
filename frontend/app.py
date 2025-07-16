@@ -106,10 +106,79 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
     except Exception as e:
         pass
     
-    # CSS for message input with compact file upload styling
-    css_content = """
+    css_content = f"""
     <style>
-        .message-input-container {
+        .stFileUploader {{
+            width: 45px !important;
+            height: 45px !important;
+            min-width: 45px !important;
+            max-width: 45px !important;
+            min-height: 45px !important;
+            max-height: 45px !important;
+            border-radius: 50% !important;
+            overflow: hidden !important;
+            background-image: url('data:image/png;base64,{attach_logo_base64}') !important;
+            background-size: cover !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+            cursor: pointer !important;
+            transition: all 0.3s ease !important;
+        }}
+        
+        .stFileUploader:hover {{
+            transform: scale(1.1) !important;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3) !important;
+            filter: brightness(1.1) !important;
+        }}
+        
+        .stFileUploader > div,
+        .stFileUploader > div > div,
+        .stFileUploader > div > div > div,
+        .stFileUploader > div > div > div > div,
+        .stFileUploader [data-testid="stFileUploadDropzone"],
+        .stFileUploader * {{
+            width: 45px !important;
+            height: 45px !important;
+            min-width: 45px !important;
+            max-width: 45px !important;
+            min-height: 45px !important;
+            max-height: 45px !important;
+            border-radius: 50% !important;
+            background: transparent !important;
+            border: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            overflow: hidden !important;
+            text-indent: -9999px !important;
+            color: transparent !important;
+            font-size: 0 !important;
+            line-height: 0 !important;
+        }}
+        
+        .stFileUploader input[type="file"] {{
+            width: 45px !important;
+            height: 45px !important;
+            opacity: 0 !important;
+            cursor: pointer !important;
+            border-radius: 50% !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            z-index: 10 !important;
+        }}
+        
+        .stForm .stHorizontalBlock > div:first-child {{
+            width: 55px !important;
+            min-width: 55px !important;
+            max-width: 55px !important;
+            flex: 0 0 55px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }}
+        
+        .message-input-container {{
             position: fixed;
             bottom: 20px;
             left: 50%;
@@ -117,9 +186,9 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             width: 90%;
             max-width: 800px;
             z-index: 1000;
-        }
+        }}
         
-        .message-input-form {
+        .message-input-form {{
             display: flex;
             align-items: flex-end;
             gap: 10px;
@@ -129,9 +198,9 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             padding: 15px;
             border: 1px solid rgba(255, 255, 255, 0.2);
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-        }
+        }}
         
-        .stTextArea > div > div > textarea {
+        .stTextArea > div > div > textarea {{
             background: linear-gradient(135deg, rgba(138, 43, 226, 0.2), rgba(168, 168, 168, 0.2)) !important;
             border: 1px solid rgba(255, 255, 255, 0.3) !important;
             border-radius: 18px !important;
@@ -142,28 +211,26 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             resize: none !important;
             outline: none !important;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1) !important;
-        }
+        }}
         
-        .stTextArea > div > div > textarea::placeholder {
+        .stTextArea > div > div > textarea::placeholder {{
             color: rgba(255, 255, 255, 0.8) !important;
-        }
+        }}
         
-        .stTextArea > div > div > textarea:focus {
+        .stTextArea > div > div > textarea:focus {{
             border: 1px solid rgba(138, 43, 226, 0.5) !important;
             box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.2) !important;
-        }
+        }}
         
-        /* Style the container around textarea */
-        .stTextArea > div {
+        .stTextArea > div {{
             background: transparent !important;
-        }
+        }}
         
-        .stTextArea {
+        .stTextArea {{
             background: transparent !important;
-        }
+        }}
         
-        /* Style the submit button */
-        .stFormSubmitButton > button {
+        .stFormSubmitButton > button {{
             width: 45px !important;
             height: 45px !important;
             border-radius: 50% !important;
@@ -179,188 +246,28 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             color: white !important;
             font-size: 18px !important;
             font-weight: bold !important;
-        }
+        }}
         
-        .stFormSubmitButton > button:hover {
+        .stFormSubmitButton > button:hover {{
             background: linear-gradient(135deg, rgba(138, 43, 226, 1), rgba(168, 100, 226, 1)) !important;
             transform: scale(1.05) !important;
             box-shadow: 0 6px 20px rgba(138, 43, 226, 0.4) !important;
-        }
+        }}
         
-        .stFormSubmitButton > button:focus {
+        .stFormSubmitButton > button:focus {{
             box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.3) !important;
-        }
+        }}
         
-        /* Compact file upload button styling */
-        .compact-file-upload {
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            width: 35px !important;
-            height: 35px !important;
-            border-radius: 50% !important;
-            background: rgba(138, 43, 226, 0.6) !important;
-            border: none !important;
-            color: white !important;
-            font-size: 16px !important;
-            cursor: pointer !important;
-            margin-right: 5px !important;
-            transition: all 0.3s ease !important;
-        }
-        
-        .compact-file-upload:hover {
-            background: rgba(138, 43, 226, 0.8) !important;
-            transform: scale(1.05) !important;
-        }
-        
-                /* File Uploader Styling */
-        .stFileUploader {
-            width: 45px !important;
-            height: 45px !important;
-            overflow: hidden !important;
-            position: relative !important;
-        }
-        
-        /* File uploader containers */
-        .stFileUploader > div,
-        .stFileUploader > div > div,
-        .stFileUploader > div > div > div,
-        .stFileUploader * {
-            width: 45px !important;
-            height: 45px !important;
-            min-width: 45px !important;
-            max-width: 45px !important;
-            min-height: 45px !important;
-            max-height: 45px !important;
-            border-radius: 50% !important;
-            background: transparent !important;
-            background-image: url('data:image/png;base64,{attach_logo_base64}') !important;
-            background-size: cover !important;
-            background-repeat: no-repeat !important;
-            background-position: center !important;
-            border: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            position: relative !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            transition: all 0.3s ease !important;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
-            flex-shrink: 0 !important;
-            flex-grow: 0 !important;
-        }
-        
-        /* Hide text elements */
-        .stFileUploader label,
-        .stFileUploader p,
-        .stFileUploader span,
-        .stFileUploader small,
-        .stFileUploader button {
-            display: none !important;
-            visibility: hidden !important;
-        }
-        
-        /* File input positioning */
-        .stFileUploader input[type="file"] {
-            position: absolute !important;
-            width: 45px !important;
-            height: 45px !important;
-            opacity: 0 !important;
-            cursor: pointer !important;
-            border-radius: 50% !important;
-            z-index: 20 !important;
-            top: 0 !important;
-            left: 0 !important;
-        }
-        
-        /* Hover effects */
-        .stFileUploader:hover > div,
-        .stFileUploader:hover > div > div,
-        .stFileUploader:hover > div > div > div,
-        .stFileUploader:hover * {
-            transform: scale(1.1) !important;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3) !important;
-            filter: brightness(1.1) !important;
-        }
-        
-        /* Force hide dropzone specific elements */
-        .stFileUploader [data-testid="stFileUploadDropzone"] p,
-        .stFileUploader [data-testid="stFileUploadDropzone"] span,
-        .stFileUploader [data-testid="stFileUploadDropzoneInstructions"] {
-            display: none !important;
-            visibility: hidden !important;
-            opacity: 0 !important;
-        }
-        
-        /* Circle enforcement */
-        .stFileUploader,
-        .stFileUploader > *,
-        .stFileUploader > * > *,
-        .stFileUploader > * > * > * {
-            border-radius: 50% !important;
-            -webkit-border-radius: 50% !important;
-            -moz-border-radius: 50% !important;
-            border-top-left-radius: 50% !important;
-            border-top-right-radius: 50% !important;
-            border-bottom-left-radius: 50% !important;
-            border-bottom-right-radius: 50% !important;
-            clip-path: circle(50%) !important;
-        }
-        
-        /* Square dimensions */
-        .stFileUploader,
-        .stFileUploader > *,
-        .stFileUploader > * > *,
-        .stFileUploader > * > * > * {
-            aspect-ratio: 1/1 !important;
-            width: 45px !important;
-            height: 45px !important;
-        }
-        
-        /* Hide drag text */
-        .stFileUploader > div > div > div {
-            display: none !important;
-        }
-        
-        .stFileUploader > div > div > p {
-            display: none !important;
-        }
-        
-        .stFileUploader > div > div > small {
-            display: none !important;
-        }
-        
-        .stFileUploader > div > div > span {
-            display: none !important;
-        }
-        
-        .stFileUploader > div > div > button {
-            display: none !important;
-        }
-        
-        /* Hide any text content in file uploader */
-        .stFileUploader * {
-            font-size: 0 !important;
-            text-indent: -9999px !important;
-        }
-        
-        /* Override text hiding for our custom icon */
-        .stFileUploader > div > div::before {
-            font-size: 16px !important;
-            text-indent: 0 !important;
-        }
-        
-        .uploaded-files {
+        .uploaded-files {{
             background: rgba(138, 43, 226, 0.1);
             border-radius: 8px;
             padding: 8px;
             margin-bottom: 10px;
             max-height: 120px;
             overflow-y: auto;
-        }
+        }}
         
-        .file-item {
+        .file-item {{
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -370,46 +277,112 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             border-radius: 6px;
             font-size: 12px;
             color: white;
-        }
+        }}
         
-        .file-name {
+        .file-name {{
             flex: 1;
             margin-right: 10px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-        }
+        }}
         
-        .file-size {
+        .file-size {{
             color: rgba(255, 255, 255, 0.7);
             margin-right: 10px;
-        }
+        }}
         
-        .send-icon {
+        .send-icon {{
             color: white !important;
             font-size: 18px !important;
-        }
+        }}
         
-        /* Small clear button styling */
-        .stButton > button[title="Tüm dosyaları temizle"] {
+        .stButton > button[title="Tüm dosyaları temizle"] {{
             background: rgba(231, 76, 60, 0.7) !important;
             border: none !important;
             border-radius: 6px !important;
             padding: 4px 8px !important;
             font-size: 11px !important;
             color: white !important;
-            height: 28px !important;
-            min-height: 28px !important;
-        }
+            transition: all 0.3s ease !important;
+        }}
         
-        .stButton > button[title="Tüm dosyaları temizle"]:hover {
+        .stButton > button[title="Tüm dosyaları temizle"]:hover {{
             background: rgba(231, 76, 60, 0.9) !important;
-            transform: scale(1.02) !important;
-        }
+        }}
     </style>
+    
+    <script>
+        function forceFileUploaderStyle() {{
+            const uploaders = document.querySelectorAll('.stFileUploader');
+            uploaders.forEach(uploader => {{
+                uploader.style.cssText = `
+                    width: 45px !important;
+                    height: 45px !important;
+                    min-width: 45px !important;
+                    max-width: 45px !important;
+                    min-height: 45px !important;
+                    max-height: 45px !important;
+                    border-radius: 50% !important;
+                    overflow: hidden !important;
+                    background-image: url('data:image/png;base64,{attach_logo_base64}') !important;
+                    background-size: cover !important;
+                    background-repeat: no-repeat !important;
+                    background-position: center !important;
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+                    cursor: pointer !important;
+                    transition: all 0.3s ease !important;
+                `;
+                
+                const allElements = uploader.querySelectorAll('*');
+                allElements.forEach(el => {{
+                    el.style.cssText = `
+                        width: 45px !important;
+                        height: 45px !important;
+                        min-width: 45px !important;
+                        max-width: 45px !important;
+                        min-height: 45px !important;
+                        max-height: 45px !important;
+                        border-radius: 50% !important;
+                        background: transparent !important;
+                        border: none !important;
+                        padding: 0 !important;
+                        margin: 0 !important;
+                        overflow: hidden !important;
+                        text-indent: -9999px !important;
+                        color: transparent !important;
+                        font-size: 0 !important;
+                        line-height: 0 !important;
+                    `;
+                }});
+                
+                const fileInput = uploader.querySelector('input[type="file"]');
+                if (fileInput) {{
+                    fileInput.style.cssText = `
+                        width: 45px !important;
+                        height: 45px !important;
+                        opacity: 0 !important;
+                        cursor: pointer !important;
+                        border-radius: 50% !important;
+                        position: absolute !important;
+                        top: 0 !important;
+                        left: 0 !important;
+                        z-index: 10 !important;
+                    `;
+                }}
+            }});
+        }}
+        
+        // Apply styles immediately and on any changes
+        forceFileUploaderStyle();
+        setInterval(forceFileUploaderStyle, 100);
+        
+        // Also apply on DOM changes
+        const observer = new MutationObserver(forceFileUploaderStyle);
+        observer.observe(document.body, {{ childList: true, subtree: true }});
+    </script>
     """
     
-    css_content = css_content.replace('{attach_logo_base64}', attach_logo_base64)
     st.markdown(css_content, unsafe_allow_html=True)
     
     # Form container styling
@@ -475,7 +448,7 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             uploaded_file = st.file_uploader(
                 "",
                 type=['pdf', 'txt', 'md', 'docx', 'doc', 'html', 'rtf', 'csv', 'json', 'xml'],
-                help="Dosya ekle (PDF, TXT, MD, DOCX, DOC, HTML, RTF, CSV, JSON, XML - Max: 10MB)",
+                help="Dosya ekle",
                 key=f"file_uploader_{component_key}",
                 label_visibility="hidden"
             )
@@ -1202,6 +1175,11 @@ def process_message(user_input):
         )
         
         st.session_state.messages.append({"role": "assistant", "content": response, "attachments": []})
+        
+        try:
+            load_conversations()
+        except Exception as refresh_error:
+            pass  
         
     except Exception as e:
         error_msg = f"Error: {str(e)}"

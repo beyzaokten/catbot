@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from .models.chat import Message, ChatRequest, ChatResponse, ModelsResponse, FileResponse as FileResponseModel, FileUploadResponse, FileListResponse
 from .services.llm_service import LLMModel
 from .services.file_service import FileService
+from .services.title_service import TitleGenerationService
 from .database.database import get_db, init_database
 from .repositories.chat_repository import ChatRepository
 from .repositories.file_repository import FileRepository
@@ -20,6 +21,7 @@ async def startup_event():
 
 llm_model = LLMModel()
 file_service = FileService()
+title_service = TitleGenerationService()
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, db: Session = Depends(get_db)):
@@ -49,6 +51,19 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
         
         # Add assistant response to database
         assistant_message = chat_repo.add_message(conversation.id, "assistant", llm_response)
+        
+
+        if (conversation.title == "New Conversation" or conversation.title == "Yeni Sohbet") and len(messages) <= 2:
+            try:
+                new_title = title_service.update_conversation_title(
+                    conversation.id, 
+                    request.message, 
+                    chat_repo
+                )
+                if new_title:
+                    print(f"✅ Generated title for conversation {conversation.id}: {new_title}")
+            except Exception as e:
+                print(f"⚠️ Title generation failed: {e}")
         
         return ChatResponse(
             response=llm_response,
@@ -319,6 +334,82 @@ async def create_conversation(title: str = "New Conversation", db: Session = Dep
         }
     
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/conversations/{conversation_id}/generate-title")
+async def generate_conversation_title(conversation_id: int, db: Session = Depends(get_db)):
+    """Generate or regenerate a conversation title based on first message"""
+    try:
+        chat_repo = ChatRepository(db)
+        
+        # Get conversation messages
+        messages = chat_repo.get_conversation_messages(conversation_id)
+        if not messages:
+            raise HTTPException(status_code=400, detail="No messages found to generate title from")
+        
+        # Find first user message
+        first_user_message = None
+        for msg in messages:
+            if msg.role == "user":
+                first_user_message = msg.content
+                break
+        
+        if not first_user_message:
+            raise HTTPException(status_code=400, detail="No user message found")
+        
+        # Generate and update title
+        new_title = title_service.update_conversation_title(
+            conversation_id, 
+            first_user_message, 
+            chat_repo
+        )
+        
+        if not new_title:
+            raise HTTPException(status_code=500, detail="Failed to generate title")
+        
+        return {
+            "status": "success",
+            "title": new_title,
+            "message": "Title generated successfully"
+        }
+    
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/conversations/{conversation_id}/title")
+async def update_conversation_title_manual(
+    conversation_id: int, 
+    title: str, 
+    db: Session = Depends(get_db)
+):
+    """Manually update conversation title"""
+    try:
+        chat_repo = ChatRepository(db)
+        
+        # Validate title length
+        if len(title.strip()) == 0:
+            raise HTTPException(status_code=400, detail="Title cannot be empty")
+        
+        if len(title) > 255:
+            raise HTTPException(status_code=400, detail="Title too long (max 255 characters)")
+        
+        # Update title
+        updated_conversation = chat_repo.update_conversation_title(conversation_id, title.strip())
+        
+        if not updated_conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        return {
+            "status": "success",
+            "title": updated_conversation.title,
+            "message": "Title updated successfully"
+        }
+    
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/conversations/{conversation_id}")
