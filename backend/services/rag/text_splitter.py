@@ -18,18 +18,17 @@ class TextSplitter:
     DEFAULT_CHUNK_SIZE = 1000
     DEFAULT_OVERLAP = 200
     
-    # English-optimized separators
     ENGLISH_SEPARATORS = [
-        "\n\n",  # Paragraphs
-        "\n",    # Lines
-        ". ",    # Sentences
-        "! ",    # Exclamations
-        "? ",    # Questions
-        "; ",    # Semicolons
-        ": ",    # Colons
-        ", ",    # Commas
-        " ",     # Words
-        ""       # Characters
+        "\n\n",  
+        "\n",    
+        ". ",    
+        "! ",    
+        "? ",    
+        "; ",   
+        ": ",    
+        ", ",    
+        " ",    
+        ""       
     ]
     
     def __init__(self, chunk_size: int = None, chunk_overlap: int = None):

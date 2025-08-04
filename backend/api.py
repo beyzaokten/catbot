@@ -7,21 +7,40 @@ from .models.chat import Message, ChatRequest, ChatResponse, ModelsResponse, Fil
 from .services.llm_service import LLMModel
 from .services.file_service import FileService
 from .services.title_service import TitleGenerationService
+from .services.rag.rag_pipeline import RAGPipeline
 from .database.database import get_db, init_database
 from .repositories.chat_repository import ChatRepository
 from .repositories.file_repository import FileRepository
 from .database.models import Conversation, Message as DBMessage, File as DBFile
+import os
+from datetime import datetime
+from pathlib import Path
 
 app = FastAPI()
+
+# Initialize services and models
+llm_model = LLMModel()
+file_service = FileService()
+title_service = TitleGenerationService()
+rag_pipeline = RAGPipeline()
+
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint"""
+    return {"status": "healthy", "service": "CatBot API"}
 
 @app.on_event("startup")
 async def startup_event():
     init_database()
     print("✅ Database initialized")
-
-llm_model = LLMModel()
-file_service = FileService()
-title_service = TitleGenerationService()
+    
+    # Initialize RAG pipeline
+    try:
+        rag_pipeline.initialize()
+        print("✅ RAG pipeline initialized")
+    except Exception as e:
+        print(f"⚠️ RAG pipeline initialization failed: {e}")
+        print("📄 File processing will work without RAG features")
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, db: Session = Depends(get_db)):
@@ -44,7 +63,41 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
         
         llm_model.history = history
         
-        llm_response = llm_model.get_response(request.message)
+        enhanced_message = request.message
+        
+        try:
+            if rag_pipeline:
+                context_results = rag_pipeline.query_documents(
+                    query=request.message,
+                    top_k=5,
+                    similarity_threshold=0.35
+                )
+                
+                if context_results:
+                    context_parts = []
+                    for result in context_results:
+                        source = result.metadata.get('filename', 'Unknown source')
+                        content = result.content.strip()
+                        
+                        if len(content) > 500:
+                            content = content[:500] + "..."
+                        context_parts.append(f"[Source: {source}]\n{content}")
+                    
+                    if context_parts:
+                        context_text = "\n\n---\n\n".join(context_parts)
+                        enhanced_message = f"""Based on the following relevant information from uploaded documents, please answer the user's question:
+
+RELEVANT CONTEXT:
+{context_text}
+
+USER QUESTION: {request.message}
+
+Please provide a comprehensive answer using the context above. If the context is relevant, reference the sources. If the context doesn't help answer the question, just answer normally."""
+                
+        except Exception:
+            pass
+        
+        llm_response = llm_model.get_response(enhanced_message)
         
         if isinstance(llm_response, dict) and 'text' in llm_response:
             llm_response = llm_response['text']
@@ -460,6 +513,214 @@ async def clear_all_history(db: Session = Depends(get_db)):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# RAG-related endpoints
+@app.post("/files/{file_id}/process")
+async def process_file_with_rag(file_id: int, db: Session = Depends(get_db)):
+    """Process uploaded file through RAG pipeline"""
+    try:
+        file_repo = FileRepository(db)
+        file = file_repo.get_file(file_id)
+        
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Process file through RAG pipeline
+        file_path = os.path.abspath(file.file_path)
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            print(f"❌ File not found at path: {file_path}")
+            print(f"🔍 Original file path: {file.file_path}")
+            print(f"🔍 Current working directory: {os.getcwd()}")
+            return {
+                "status": "error",
+                "message": f"File not found at path: {file_path}",
+                "file_id": file_id
+            }
+        
+
+        result = rag_pipeline.process_document(file_path)
+        
+        if result['success']:
+            return {
+                "status": "success",
+                "message": f"File processed successfully: {result['chunks_added']} chunks added",
+                "file_id": file_id,
+                "filename": file.filename,
+                "chunks_added": result['chunks_added'],
+                "total_characters": result['total_characters'],
+                "file_type": result['file_type']
+            }
+        else:
+            return {
+                "status": "error",
+                "message": f"Processing failed: {result['error']}",
+                "file_id": file_id,
+                "filename": file.filename
+            }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File processing failed: {str(e)}")
+
+@app.get("/search/context")
+async def search_context(query: str, top_k: int = 5, threshold: float = 0.0):
+    """Search for relevant context from processed documents"""
+    try:
+        if not query or not query.strip():
+            raise HTTPException(status_code=400, detail="Query cannot be empty")
+        
+        # Search for relevant chunks
+        search_results = rag_pipeline.query_documents(
+            query=query.strip(),
+            top_k=top_k,
+            similarity_threshold=threshold
+        )
+        
+        # Format results
+        formatted_results = []
+        for result in search_results:
+            formatted_results.append({
+                "content": result.content,
+                "similarity_score": result.similarity_score,
+                "source": result.metadata.get('filename', 'Unknown'),
+                "chunk_index": result.metadata.get('chunk_index', 0),
+                "file_type": result.metadata.get('file_extension', 'unknown')
+            })
+        
+        return {
+            "query": query,
+            "results": formatted_results,
+            "total_results": len(formatted_results)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Context search failed: {str(e)}")
+
+@app.get("/rag/stats")
+async def get_rag_stats():
+    """Get RAG pipeline statistics"""
+    try:
+        stats = rag_pipeline.get_pipeline_stats()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get RAG stats: {str(e)}")
+
+@app.get("/rag/test/{query}")
+async def test_rag_query(query: str):
+    """Test RAG query for debugging"""
+    try:
+        context_results = rag_pipeline.query_documents(
+            query=query,
+            top_k=5,
+            similarity_threshold=0.1
+        )
+        
+        formatted_results = []
+        for result in context_results:
+            formatted_results.append({
+                "content": result.content[:200] + "...",
+                "similarity_score": result.similarity_score,
+                "source": result.metadata.get('filename', 'Unknown'),
+                "chunk_index": result.metadata.get('chunk_index', 0)
+            })
+        
+        return {
+            "query": query,
+            "total_results": len(formatted_results),
+            "results": formatted_results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"RAG test failed: {str(e)}")
+
+@app.get("/debug/pdf/{file_id}")
+async def debug_pdf_processing(file_id: int, db: Session = Depends(get_db)):
+    """Debug PDF processing step by step"""
+    try:
+        file_repo = FileRepository(db)
+        file = file_repo.get_file(file_id)
+        
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        print(f"🔍 Debug PDF Processing for file ID: {file_id}")
+        print(f"📋 Database record:")
+        print(f"  - filename: {file.filename}")
+        print(f"  - file_path: {file.file_path}")
+        print(f"  - file_size: {file.file_size}")
+        print(f"  - mime_type: {file.mime_type}")
+        
+        # Check file path resolution
+        file_path = os.path.abspath(file.file_path)
+        print(f"📁 Absolute path: {file_path}")
+        print(f"📂 Working directory: {os.getcwd()}")
+        print(f"✅ File exists: {os.path.exists(file_path)}")
+        
+        if os.path.exists(file_path):
+            print(f"📊 File info:")
+            file_stat = os.stat(file_path)
+            print(f"  - Size: {file_stat.st_size} bytes")
+            print(f"  - Modified: {file_stat.st_mtime}")
+            
+            # Test PyMuPDF directly
+            try:
+                import fitz
+                print(f"🔍 Testing PyMuPDF directly...")
+                pdf_doc = fitz.open(file_path)
+                print(f"✅ PyMuPDF opened successfully: {len(pdf_doc)} pages")
+                
+                if len(pdf_doc) > 0:
+                    page = pdf_doc.load_page(0)
+                    text = page.get_text()
+                    print(f"📄 First page text length: {len(text)}")
+                    print(f"📄 First 200 chars: {text[:200]}")
+                
+                pdf_doc.close()
+                
+            except Exception as e:
+                print(f"❌ PyMuPDF failed: {e}")
+                import traceback
+                print(f"📍 Traceback: {traceback.format_exc()}")
+        
+        return {
+            "file_id": file_id,
+            "filename": file.filename,
+            "file_path": file.file_path,
+            "absolute_path": file_path,
+            "exists": os.path.exists(file_path),
+            "working_dir": os.getcwd()
+        }
+        
+    except Exception as e:
+        print(f"❌ Debug failed: {e}")
+        import traceback
+        print(f"📍 Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/rag/clear")
+async def clear_rag_database():
+    """Clear all documents from RAG database (for testing)"""
+    try:
+        stats_before = rag_pipeline.get_pipeline_stats()
+        print(f"🗑️ Clearing RAG database...")
+        print(f"📊 Before: {stats_before}")
+        
+        # Clear the vector store
+        rag_pipeline.vector_store.reset_collection()
+        
+        stats_after = rag_pipeline.get_pipeline_stats()
+        print(f"📊 After: {stats_after}")
+        
+        return {
+            "status": "success",
+            "message": "RAG database cleared successfully",
+            "before": stats_before,
+            "after": stats_after
+        }
+    except Exception as e:
+        print(f"❌ Failed to clear RAG database: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear RAG database: {str(e)}")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

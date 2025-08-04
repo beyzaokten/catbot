@@ -56,11 +56,8 @@ class RAGPipeline:
         self._ensure_initialized()
         
         try:
-            # Process document
-            self.logger.info(f"Processing document: {file_path}")
             doc_content = self.document_processor.process_document(file_path)
             
-            # Split into chunks
             chunks = self.text_splitter.split_text(
                 doc_content.text, 
                 doc_content.metadata
@@ -74,13 +71,11 @@ class RAGPipeline:
                     'chunks_added': 0
                 }
             
-            # Generate embeddings
             chunk_texts = [chunk.content for chunk in chunks]
             embeddings = self.embedding_service.generate_embeddings(chunk_texts)
             
-            # Prepare metadata
             chunk_metadatas = []
-            for i, chunk in enumerate(chunks):
+            for chunk in chunks:
                 metadata = chunk.metadata.copy()
                 metadata.update({
                     'chunk_index': chunk.chunk_index,
@@ -90,15 +85,13 @@ class RAGPipeline:
                 })
                 chunk_metadatas.append(metadata)
             
-            # Store in vector database
             document_ids = self.vector_store.add_documents(
                 texts=chunk_texts,
                 embeddings=embeddings,
                 metadatas=chunk_metadatas
             )
             
-            # Return results
-            result = {
+            return {
                 'success': True,
                 'document_id': doc_content.metadata.get('filename', 'unknown'),
                 'chunks_added': len(chunks),
@@ -108,16 +101,18 @@ class RAGPipeline:
                 'embedding_dimension': self.embedding_service.EMBEDDING_DIMENSION
             }
             
-            self.logger.info(f"Document processed successfully: {result['chunks_added']} chunks added")
-            return result
-            
         except Exception as e:
-            self.logger.error(f"Failed to process document {file_path}: {e}")
+            print(f"❌ RAG Pipeline: Failed to process document {file_path}")
+            print(f"📍 Error: {str(e)}")
+            import traceback
+            print(f"📍 Traceback: {traceback.format_exc()}")
             return {
                 'success': False,
                 'error': str(e),
                 'document_id': None,
-                'chunks_added': 0
+                'chunks_added': 0,
+                'total_characters': 0,
+                'file_type': 'unknown'
             }
     
     def process_multiple_documents(self, file_paths: List[str]) -> Dict[str, Any]:

@@ -10,7 +10,42 @@ import subprocess
 import html
 from typing import Optional, List
 
-API_URL = "http://127.0.0.1:8000"
+class APIService:    
+    def __init__(self, base_url: str = "http://127.0.0.1:8000"):
+        self.base_url = base_url
+        self._connection_verified = False
+    
+    def verify_connection(self, max_retries: int = 3) -> bool:
+        for attempt in range(max_retries):
+            try:
+                timeout = 3 + (attempt * 2)
+                response = requests.get(f"{self.base_url}/health", timeout=timeout)
+                if response.status_code == 200:
+                    self._connection_verified = True
+                    return True
+            except Exception:
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+                continue
+        return False
+    
+    def is_connected(self) -> bool:
+        """Check if connection is verified"""
+        return self._connection_verified or self.verify_connection(max_retries=1)
+    
+    def get(self, endpoint: str, **kwargs) -> requests.Response:
+        return requests.get(f"{self.base_url}{endpoint}", **kwargs)
+    
+    def post(self, endpoint: str, **kwargs) -> requests.Response:
+        return requests.post(f"{self.base_url}{endpoint}", **kwargs)
+    
+    def delete(self, endpoint: str, **kwargs) -> requests.Response:
+        return requests.delete(f"{self.base_url}{endpoint}", **kwargs)
+    
+    def put(self, endpoint: str, **kwargs) -> requests.Response:
+        return requests.put(f"{self.base_url}{endpoint}", **kwargs)
+
+api_service = APIService()
 
 try:
     import sys
@@ -27,11 +62,10 @@ def upload_file_to_backend(uploaded_file, conversation_id: Optional[int] = None)
         files = {'file': (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
         data = {}
         
-        # Only include conversation_id if it's not None to avoid foreign key issues
         if conversation_id is not None:
             data['conversation_id'] = conversation_id
         
-        response = requests.post(f"{API_URL}/upload", files=files, data=data, timeout=30)
+        response = api_service.post("/upload", files=files, data=data, timeout=30)
         
         if response.status_code == 200:
             return response.json()
@@ -57,34 +91,49 @@ def upload_file_to_backend(uploaded_file, conversation_id: Optional[int] = None)
 def get_conversation_files(conversation_id: int):
     """Get files for a conversation"""
     try:
-        response = requests.get(f"{API_URL}/conversations/{conversation_id}/files", timeout=10)
+        response = api_service.get(f"/conversations/{conversation_id}/files", timeout=10)
         if response.status_code == 200:
             return response.json().get("files", [])
         return []
-    except Exception as e:
+    except Exception:
         return []
 
 def delete_file_from_backend(file_id: int):
-    """Delete file from backend"""
     try:
-        response = requests.delete(f"{API_URL}/files/{file_id}", timeout=10)
+        response = api_service.delete(f"/files/{file_id}", timeout=10)
         return response.status_code == 200
-    except Exception as e:
+    except Exception:
         return False
 
 def get_supported_file_types():
-    """Get supported file types from backend"""
     try:
-        response = requests.get(f"{API_URL}/supported-file-types", timeout=5)
+        response = api_service.get("/supported-file-types", timeout=5)
         if response.status_code == 200:
             data = response.json()
             return data.get("supported_types", []), data.get("max_file_size_mb", 10)
         return [], 10
-    except Exception as e:
+    except Exception:
         return [], 10
 
+def process_file_with_rag(file_id: int):
+    try:
+        response = api_service.post(f"/files/{file_id}/process", timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        return {"status": "error", "message": f"HTTP {response.status_code}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+def get_rag_stats():
+    try:
+        response = api_service.get("/rag/stats", timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception:
+        return None
+
 def format_file_size(size_bytes: int) -> str:
-    """Format file size in human readable format"""
     if size_bytes < 1024:
         return f"{size_bytes} B"
     elif size_bytes < 1024 * 1024:
@@ -116,14 +165,33 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             min-height: 45px !important;
             max-height: 45px !important;
             border-radius: 50% !important;
+            position: relative !important;
             overflow: hidden !important;
             background-image: url('data:image/png;base64,{attach_logo_base64}') !important;
             background-size: cover !important;
             background-repeat: no-repeat !important;
             background-position: center !important;
+            background-color: transparent !important;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
             cursor: pointer !important;
             transition: all 0.3s ease !important;
+            z-index: 1 !important;
+        }}
+        
+        .stFileUploader::before {{
+            content: '' !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            background-image: url('data:image/png;base64,{attach_logo_base64}') !important;
+            background-size: cover !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+            border-radius: 50% !important;
+            z-index: 2 !important;
+            pointer-events: none !important;
         }}
         
         .stFileUploader:hover {{
@@ -137,23 +205,18 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
         .stFileUploader > div > div > div,
         .stFileUploader > div > div > div > div,
         .stFileUploader [data-testid="stFileUploadDropzone"],
-        .stFileUploader * {{
-            width: 45px !important;
-            height: 45px !important;
-            min-width: 45px !important;
-            max-width: 45px !important;
-            min-height: 45px !important;
-            max-height: 45px !important;
-            border-radius: 50% !important;
-            background: transparent !important;
-            border: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            overflow: hidden !important;
-            text-indent: -9999px !important;
-            color: transparent !important;
-            font-size: 0 !important;
-            line-height: 0 !important;
+        .stFileUploader div,
+        .stFileUploader span,
+        .stFileUploader p,
+        .stFileUploader button,
+        .stFileUploader label {{
+            display: none !important;
+            visibility: hidden !important;
+            width: 0 !important;
+            height: 0 !important;
+            position: absolute !important;
+            left: -9999px !important;
+            opacity: 0 !important;
         }}
         
         .stFileUploader input[type="file"] {{
@@ -165,7 +228,13 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             position: absolute !important;
             top: 0 !important;
             left: 0 !important;
-            z-index: 10 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            z-index: 3 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: transparent !important;
+            border: none !important;
         }}
         
         .stForm .stHorizontalBlock > div:first-child {{
@@ -258,38 +327,44 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.3) !important;
         }}
         
-        .uploaded-files {{
+        .uploaded-files-compact {{
             background: rgba(138, 43, 226, 0.1);
             border-radius: 8px;
-            padding: 8px;
+            padding: 8px 12px;
             margin-bottom: 10px;
-            max-height: 120px;
-            overflow-y: auto;
+            border: 1px solid rgba(138, 43, 226, 0.3);
         }}
         
-        .file-item {{
+        .file-item-compact {{
             display: flex;
-            justify-content: space-between;
             align-items: center;
             background: rgba(255, 255, 255, 0.1);
-            padding: 5px 10px;
-            margin: 3px 0;
+            padding: 6px 10px;
+            margin: 2px 0;
             border-radius: 6px;
-            font-size: 12px;
+            font-size: 11px;
             color: white;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }}
+        
+        .file-icon {{
+            margin-right: 6px;
+            font-size: 12px;
         }}
         
         .file-name {{
             flex: 1;
-            margin-right: 10px;
+            margin-right: 8px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            font-weight: 500;
         }}
         
         .file-size {{
-            color: rgba(255, 255, 255, 0.7);
-            margin-right: 10px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 10px;
+            margin-left: auto;
         }}
         
         .send-icon {{
@@ -334,41 +409,34 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
                     transition: all 0.3s ease !important;
                 `;
                 
-                const allElements = uploader.querySelectorAll('*');
+                const allElements = uploader.querySelectorAll('div, span, p, button, label');
                 allElements.forEach(el => {{
-                    el.style.cssText = `
-                        width: 45px !important;
-                        height: 45px !important;
-                        min-width: 45px !important;
-                        max-width: 45px !important;
-                        min-height: 45px !important;
-                        max-height: 45px !important;
-                        border-radius: 50% !important;
-                        background: transparent !important;
-                        border: none !important;
-                        padding: 0 !important;
-                        margin: 0 !important;
-                        overflow: hidden !important;
-                        text-indent: -9999px !important;
-                        color: transparent !important;
-                        font-size: 0 !important;
-                        line-height: 0 !important;
-                    `;
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                    el.style.position = 'absolute';
+                    el.style.left = '-9999px';
+                    el.style.opacity = '0';
+                    el.style.width = '0';
+                    el.style.height = '0';
                 }});
                 
                 const fileInput = uploader.querySelector('input[type="file"]');
                 if (fileInput) {{
-                    fileInput.style.cssText = `
-                        width: 45px !important;
-                        height: 45px !important;
-                        opacity: 0 !important;
-                        cursor: pointer !important;
-                        border-radius: 50% !important;
-                        position: absolute !important;
-                        top: 0 !important;
-                        left: 0 !important;
-                        z-index: 10 !important;
-                    `;
+                    fileInput.style.width = '45px';
+                    fileInput.style.height = '45px';
+                    fileInput.style.opacity = '0';
+                    fileInput.style.cursor = 'pointer';
+                    fileInput.style.position = 'absolute';
+                    fileInput.style.top = '0';
+                    fileInput.style.left = '0';
+                    fileInput.style.right = '0';
+                    fileInput.style.bottom = '0';
+                    fileInput.style.zIndex = '3';
+                    fileInput.style.pointerEvents = 'auto';
+                    fileInput.style.margin = '0';
+                    fileInput.style.padding = '0';
+                    fileInput.style.background = 'transparent';
+                    fileInput.style.border = 'none';
                 }}
             }});
         }}
@@ -412,34 +480,50 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
     # Get current conversation ID
     current_conversation_id = getattr(st.session_state, 'current_conversation_id', None)
     
+    # Show upload success messages
+    if f'upload_success_{component_key}' in st.session_state:
+        st.success(st.session_state[f'upload_success_{component_key}'])
+        del st.session_state[f'upload_success_{component_key}']
+    
+    if f'rag_success_{component_key}' in st.session_state:
+        st.success(st.session_state[f'rag_success_{component_key}'])
+        del st.session_state[f'rag_success_{component_key}']
+    
+    if f'rag_error_{component_key}' in st.session_state:
+        st.warning(st.session_state[f'rag_error_{component_key}'])
+        del st.session_state[f'rag_error_{component_key}']
+
     if st.session_state[f'uploaded_files_{component_key}']:
-        st.markdown('<div class="uploaded-files">', unsafe_allow_html=True)
+        st.markdown('''
+        <div class="uploaded-files-compact">
+            <div style="color: rgba(255,255,255,0.9); font-size: 12px; margin-bottom: 8px;">
+                📎 Ekli Dosyalar:
+            </div>
+        </div>
+        ''', unsafe_allow_html=True)
+        
         for idx, file_info in enumerate(st.session_state[f'uploaded_files_{component_key}']):
             file_size_str = format_file_size(file_info['size'])
             
-            st.markdown(
-                f'<div class="file-item">'
-                f'<span class="file-name" title="{file_info["name"]}">{file_info["name"]}</span>'
-                f'<span class="file-size">{file_size_str}</span>'
-                f'<span style="color: rgba(255,255,255,0.6);">📄</span>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        col1, col2, col3 = st.columns([2, 1, 2])
-        with col2:
-            if st.button("🗑️ Temizle", key=f"clear_files_{component_key}", help="Tüm dosyaları temizle"):
-                # Clear files from backend
-                for file_info in st.session_state[f'uploaded_files_{component_key}']:
+            col1, col2 = st.columns([0.9, 0.1])
+            with col1:
+                st.markdown(
+                    f'<div class="file-item-compact">'
+                    f'<span class="file-icon">📄</span>'
+                    f'<span class="file-name" title="{file_info["name"]}">{file_info["name"]}</span>'
+                    f'<span class="file-size">({file_size_str})</span>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+            with col2:
+                if st.button("❌", key=f"remove_file_{component_key}_{idx}", help=f"Remove {file_info['name']}"):
                     delete_file_from_backend(file_info['id'])
-                # Clear from session state
-                st.session_state[f'uploaded_files_{component_key}'] = []
-                # Clear processed files tracking
-                processed_files_key = f'processed_files_{component_key}'
-                if processed_files_key in st.session_state:
-                    st.session_state[processed_files_key] = set()
+                    st.session_state[f'uploaded_files_{component_key}'].pop(idx)
+                    processed_files_key = f'processed_files_{component_key}'
+                    if processed_files_key in st.session_state:
+                        file_key = f"{file_info['name']}_{file_info['size']}"
+                        st.session_state[processed_files_key].discard(file_key)
+                    st.rerun()
 
     with st.form(key=f"chat_form_{component_key}", clear_on_submit=True):
         col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
@@ -454,7 +538,6 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             )
         
         with col2:
-            # Message text area
             message = st.text_area(
                 label="Mesaj",
                 placeholder=placeholder,
@@ -464,7 +547,6 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             )
         
         with col3:
-            # Submit button 
             submitted = st.form_submit_button("➤", help="Mesajı gönder")
         
         if uploaded_file is not None:
@@ -485,13 +567,25 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
                         
                         if upload_result.get("success"):
                             file_info = upload_result.get("file", {})
+                            file_id = file_info.get('id')
                             st.session_state[f'uploaded_files_{component_key}'].append({
-                                'id': file_info.get('id'),
+                                'id': file_id,
                                 'name': file_info.get('filename'),
                                 'size': file_info.get('file_size'),
                                 'type': file_info.get('mime_type')
                             })
-                            st.success(f"✅ {uploaded_file.name} başarıyla yüklendi!")
+                            
+                            # Store success message in session state
+                            st.session_state[f'upload_success_{component_key}'] = f"✅ {uploaded_file.name} başarıyla yüklendi!"
+                            
+                            # Process file through RAG pipeline
+                            with st.spinner("📚 Dosya AI sistemi için işleniyor..."):
+                                rag_result = process_file_with_rag(file_id)
+                                if rag_result.get("status") == "success":
+                                    chunks_added = rag_result.get("chunks_added", 0)
+                                    st.session_state[f'rag_success_{component_key}'] = f"🧠 Dosya AI sistemi tarafından işlendi! ({chunks_added} parça oluşturuldu)"
+                                else:
+                                    st.session_state[f'rag_error_{component_key}'] = f"⚠️ AI işleme hatası: {rag_result.get('message', 'Bilinmeyen hata')}"
                         else:
                             error_msg = upload_result.get('message', 'Bilinmeyen hata')
                             st.error(f"❌ Yükleme hatası: {error_msg}")
@@ -510,27 +604,16 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
             llm_message = clean_user_message
             
             if st.session_state[f'uploaded_files_{component_key}']:
-                file_contents = []
+                attachment_info = []
                 for file_info in st.session_state[f'uploaded_files_{component_key}']:
-                    content = process_file_content(file_info)
-                    file_contents.append(content)
+                    attachment_info.append(f"📎 {file_info['name']} ({format_file_size(file_info['size'])})")
                 
-                if file_contents:
-                    # Prompt for LLM file analysis
-                    file_context = "\n\n=== FILE ATTACHMENT ANALYSIS ===\n"
-                    file_context += "USER HAS ATTACHED THE FOLLOWING FILE(S). ANALYZE THEM CAREFULLY:\n\n"
-                    file_context += "".join(file_contents)
-                    file_context += "\n=== ANALYSIS INSTRUCTIONS ===\n"
-                    file_context += "You are an expert document analyzer. Please:\n"
-                    file_context += "1. READ the entire file content thoroughly\n"
-                    file_context += "2. UNDERSTAND the context and main topics\n"
-                    file_context += "3. PROVIDE a comprehensive response based on the user's question\n"
-                    file_context += "4. REFERENCE specific details from the file when relevant\n"
-                    file_context += "5. If asked to summarize, provide key points and main concepts\n"
-                    file_context += "6. Maintain accuracy - only use information from the provided content\n"
-                    file_context += "7. Be thorough and informative in your analysis\n\n"
-                    file_context += "USER QUESTION: " + clean_user_message + "\n"
-                    file_context += "RESPOND based on the attached file content above.\n"
+                # Simple message indicating files were attached
+                if attachment_info:
+                    file_context = f"\n\n=== ATTACHED FILES ===\n"
+                    file_context += "\n".join(attachment_info)
+                    file_context += f"\n\nUser message: {clean_user_message}"
+                    file_context += f"\n\nNote: The attached files have been processed by the RAG system. Please provide a response based on the file contents and the user's question."
                     llm_message = file_context
             
             # Add message to UI history with file attachment info
@@ -561,12 +644,7 @@ def message_input_component(placeholder="Mesajınızı yazın...", key=None):
     
     return None
 
-def check_api_connection():
-    try:
-        response = requests.get(f"{API_URL}/models", timeout=2)
-        return response.status_code == 200
-    except Exception as e:
-        return False
+
 
 st.set_page_config(
     page_title="CatBot - Kişisel AI Asistanı",
@@ -1040,7 +1118,7 @@ def get_image_base64(image_path):
 # API fonksiyonları
 def get_models():
     try:
-        response = requests.get(f"{API_URL}/models")
+        response = api_service.get("/models")
         if response.status_code == 200:
             return response.json()["models"]
         return ["llama3"]
@@ -1048,33 +1126,31 @@ def get_models():
         return ["llama3"]
 
 def get_conversations():
-    """Get all conversations from API"""
     try:
-        response = requests.get(f"{API_URL}/conversations")
+        response = api_service.get("/conversations")
         if response.status_code == 200:
             return response.json()["conversations"]
         return []
-    except Exception as e:
+    except Exception:
         return []
 
 def get_conversation_messages(conversation_id):
     """Get messages for a specific conversation"""
     try:
-        response = requests.get(f"{API_URL}/conversations/{conversation_id}")
+        response = api_service.get(f"/conversations/{conversation_id}")
         if response.status_code == 200:
             return response.json()["messages"]
         return []
-    except Exception as e:
+    except Exception:
         return []
 
 def create_conversation(title="New Conversation"):
-    """Create a new conversation"""
     try:
-        response = requests.post(f"{API_URL}/conversations", params={"title": title})
+        response = api_service.post("/conversations", params={"title": title})
         if response.status_code == 200:
             return response.json()
         return None
-    except Exception as e:
+    except Exception:
         return None
 
 def send_message(message, history=None, model_name=None):
@@ -1093,11 +1169,11 @@ def send_message(message, history=None, model_name=None):
         except Exception as e:
             pass  # Fall back to API
     
-    if not check_api_connection():
+    if not api_service.is_connected():
         if DIRECT_LLM:
-            return "Hem direkt LLM hem de Backend API bağlantısı başarısız. Lütfen Ollama'nın çalıştığından emin olun."
+            return "Both direct LLM and Backend API connection failed. Please ensure Ollama is running."
         else:
-            return "Backend API'ye bağlanılamadı. Lütfen API'nin çalıştığından emin olun."
+            return "Backend API connection failed. Please ensure the API is running."
         
     try:
         data = {
@@ -1107,7 +1183,7 @@ def send_message(message, history=None, model_name=None):
             "model_name": model_name
         }
         
-        response = requests.post(f"{API_URL}/chat", json=data)
+        response = api_service.post("/chat", json=data)
         
         if response.status_code == 200:
             response_data = response.json()
@@ -1126,7 +1202,7 @@ def send_message(message, history=None, model_name=None):
 
 def clear_chat_history():
     try:
-        requests.post(f"{API_URL}/clear_history")
+        api_service.post("/clear_history")
     except:
         pass
 
@@ -1134,6 +1210,7 @@ def load_conversations():
     """Load conversations from API"""
     conversations = get_conversations()
     st.session_state.conversations = conversations
+    st.session_state.conversations_loaded = True
 
 def load_conversation_messages(conversation_id):
     """Load messages for a specific conversation"""
@@ -1188,57 +1265,12 @@ def process_message(user_input):
 def read_file_content(file_id: int):
     """Read file content from backend"""
     try:
-        response = requests.get(f"{API_URL}/files/{file_id}/download", timeout=15)
+        response = api_service.get(f"/files/{file_id}/download", timeout=15)
         if response.status_code == 200:
             return response.content
         return None
-    except Exception as e:
+    except Exception:
         return None
-
-def process_file_content(file_info: dict) -> str:
-    """Process file content and return text"""
-    try:
-        content = read_file_content(file_info['id'])
-        if not content:
-            return f"[Dosya okunamadı: {file_info['name']}]"
-        
-        mime_type = file_info.get('type', '')
-        filename = file_info['name']
-        
-        # Text files
-        if mime_type.startswith('text/') or filename.endswith(('.txt', '.md', '.csv', '.json', '.xml', '.html')):
-            try:
-                text_content = content.decode('utf-8')
-                # Limit content length to prevent token overflow
-                if len(text_content) > 4000:
-                    text_content = text_content[:4000] + "\n... (dosya kesildi, çok uzun)"
-                return f"\n📄 DOSYA: {filename}\n📝 İÇERİK:\n{text_content}\n✅ DOSYA SONU\n"
-            except UnicodeDecodeError:
-                try:
-                    text_content = content.decode('latin1')
-                    if len(text_content) > 4000:
-                        text_content = text_content[:4000] + "\n... (dosya kesildi, çok uzun)"
-                    return f"\n📄 DOSYA: {filename}\n📝 İÇERİK:\n{text_content}\n✅ DOSYA SONU\n"
-                except:
-                    return f"\n\n[{filename}: Text olarak okunamadı - binary dosya olabilir]\n"
-        
-        # PDF files - basic info only for now
-        elif mime_type == 'application/pdf':
-            size_str = format_file_size(file_info['size'])
-            return f"\n\n[PDF Dosyası: {filename} ({size_str}) - İçerik henüz işlenemiyor, RAG sistemi gerekli]\n"
-        
-        # Office documents
-        elif 'word' in mime_type or filename.endswith(('.doc', '.docx')):
-            size_str = format_file_size(file_info['size'])
-            return f"\n\n[Word Dökümanı: {filename} ({size_str}) - İçerik henüz işlenemiyor, RAG sistemi gerekli]\n"
-        
-        # Other files
-        else:
-            size_str = format_file_size(file_info['size'])
-            return f"\n\n[Dosya: {filename} ({size_str}) - Bu dosya türü henüz desteklenmiyor]\n"
-            
-    except Exception as e:
-        return f"\n\n[Hata: {file_info['name']} işlenirken hata oluştu: {str(e)}]\n"
 
 def main():
     local_css()
@@ -1270,10 +1302,6 @@ def main():
         </style>
     """, unsafe_allow_html=True)
     
-    api_status = check_api_connection()
-    if not api_status and not DIRECT_LLM:
-        st.warning("Backend API'ye bağlanılamadı. Lütfen API'nin çalıştığından emin olun.")
-    
     # Session state initialization
     if 'messages' not in st.session_state:
         st.session_state.messages = []
@@ -1298,12 +1326,18 @@ def main():
                 
         threading.Thread(target=update_models).start()
     
-    # Load conversations directly (not in thread) if API is available
-    if api_status and len(st.session_state.conversations) == 0:
-        try:
-            load_conversations()
-        except Exception as e:
-            pass
+    if len(st.session_state.conversations) == 0:
+        current_time = time.time()
+        last_attempt = st.session_state.get('last_conversation_load_attempt', 0)
+        
+        if current_time - last_attempt > 5:
+            st.session_state.last_conversation_load_attempt = current_time
+            try:
+                conversations = get_conversations()
+                if conversations:
+                    st.session_state.conversations = conversations
+            except Exception:
+                pass
     
     if 'thinking' not in st.session_state:
         st.session_state.thinking = False
@@ -1362,6 +1396,34 @@ def main():
                     st.rerun()
         else:
             st.markdown('<div style="color: #888; padding: 10px; font-size: 12px;">No conversations yet</div>', unsafe_allow_html=True)
+            if st.button("🔄 Load Conversations", key="load_conversations_manual"):
+                st.session_state.last_conversation_load_attempt = 0
+                st.session_state.conversations = []
+                st.rerun()
+        
+        # RAG System Status
+        st.markdown('<div class="chat-history-title" style="margin-top: 20px;">🧠 RAG System</div>', unsafe_allow_html=True)
+        
+        rag_stats = get_rag_stats()
+        if rag_stats and rag_stats.get('is_initialized'):
+            vector_stats = rag_stats.get('vector_store', {})
+            doc_count = vector_stats.get('document_count', 0)
+            chunk_count = vector_stats.get('total_chunks', 0)
+            
+            st.markdown(f'''
+            <div style="background-color: rgba(51, 51, 51, 0.3); border-radius: 8px; padding: 8px; backdrop-filter: blur(10px); font-size: 12px; color: #ddd;">
+                <div>📚 Documents: {doc_count}</div>
+                <div>🧩 Chunks: {chunk_count}</div>
+                <div>🎯 Model: {rag_stats.get('embedding_service', {}).get('model_name', 'Unknown')}</div>
+                <div style="color: #4CAF50;">✅ Active</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        else:
+            st.markdown('''
+            <div style="background-color: rgba(51, 51, 51, 0.3); border-radius: 8px; padding: 8px; backdrop-filter: blur(10px); font-size: 12px; color: #888;">
+                <div style="color: #FFA726;">⚠️ Not initialized</div>
+            </div>
+            ''', unsafe_allow_html=True)
     
     # Ana içerik
     if len(st.session_state.messages) == 0:
@@ -1628,49 +1690,100 @@ def chat_screen():
                 </div>
                 """, unsafe_allow_html=True)
     
-    if (st.session_state.messages and 
-        st.session_state.messages[-1]["role"] == "user"):
-        user_count = len([msg for msg in st.session_state.messages if msg["role"] == "user"])
-        assistant_count = len([msg for msg in st.session_state.messages if msg["role"] == "assistant"])
+    # Check if AI is thinking
+    user_count = len([msg for msg in st.session_state.messages if msg["role"] == "user"])
+    assistant_count = len([msg for msg in st.session_state.messages if msg["role"] == "assistant"])
+    is_thinking = user_count > assistant_count
+    
+    # Debug info for thinking state
+    print(f"DEBUG: user_count={user_count}, assistant_count={assistant_count}, is_thinking={is_thinking}")
+    if st.session_state.messages:
+        print(f"DEBUG: last_message_role={st.session_state.messages[-1]['role']}")
+
+    # If AI is thinking, show thinking animation and process message
+    if is_thinking and st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+        print("DEBUG: Showing thinking animation - hiding message input")
         
-        if user_count > assistant_count:
-            # Show thinking animation
-            st.markdown(f"""
+        st.markdown(f"""
+        <div style="
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 15px;
+            padding-left: 10px;
+        ">
+            {'<img src="data:image/png;base64,' + cat_logo_base64 + '" style="width: 40px; height: 40px; border-radius: 50%; margin-right: 12px; vertical-align: top;">' if cat_logo_base64 else '<span style="font-size: 40px; margin-right: 12px; vertical-align: top;">🐱</span>'}
             <div style="
-                display: flex;
-                align-items: flex-start;
-                margin-bottom: 15px;
-                padding-left: 10px;
+                background: rgba(64, 64, 64, 0.5);
+                backdrop-filter: blur(10px);
+                border-radius: 18px 18px 18px 4px;
+                padding: 12px 16px;
+                color: white;
+                font-size: 14px;
+                line-height: 1.4;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                max-width: 300px;
             ">
-                {'<img src="data:image/png;base64,' + cat_logo_base64 + '" style="width: 40px; height: 40px; border-radius: 50%; margin-right: 12px; vertical-align: top;">' if cat_logo_base64 else '<span style="font-size: 40px; margin-right: 12px; vertical-align: top;">🐱</span>'}
-                <div style="
-                    background: rgba(64, 64, 64, 0.5);
-                    backdrop-filter: blur(10px);
-                    border-radius: 18px 18px 18px 4px;
-                    padding: 12px 16px;
-                    color: white;
-                    font-size: 14px;
-                    line-height: 1.4;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-                    max-width: 300px;
-                ">
-                    <span class="thinking-animation">Thinking<span class="thinking-dots"></span></span>
-                </div>
+                <span class="thinking-animation">Thinking<span class="thinking-dots"></span></span>
             </div>
-            """, unsafe_allow_html=True)
-            
-            last_user_message = st.session_state.messages[-1]["content"]
-            process_message(last_user_message)
-            st.rerun()
-    
-    user_message = message_input_component(
-        placeholder="Mesajınızı yazın...",
-        key="chat"
-    )
-    
-    # Process message if entered
-    if user_message:
-        process_message(user_message)
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Completely hide any potential input elements during thinking
+        st.markdown("""
+        <style>
+            /* Hide all input elements during thinking */
+            .stFileUploader,
+            .stTextInput,
+            .stTextArea,
+            .stButton,
+            div[data-testid="stTextInput"],
+            div[data-testid="stFileUploader"],
+            div[data-testid="stTextArea"] {
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                position: absolute !important;
+                left: -9999px !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div style="
+            position: fixed;
+            bottom: 20px;
+            left: calc(50% + 125px);
+            transform: translateX(-50%);
+            width: 70%;
+            max-width: 700px;
+            z-index: 1000;
+            background: linear-gradient(135deg, rgba(138, 43, 226, 0.3), rgba(168, 168, 168, 0.3));
+            backdrop-filter: blur(15px);
+            border-radius: 25px;
+            padding: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+            text-align: center;
+            color: white;
+            font-size: 14px;
+        ">
+             AI is thinking... Please wait
+        </div>
+        """, unsafe_allow_html=True)
+        
+        last_user_message = st.session_state.messages[-1]["content"]
+        process_message(last_user_message)
+        st.rerun()
+    else:
+        print("DEBUG: Showing message input - not thinking")
+        # Show message input only when NOT thinking
+        user_message = message_input_component(
+            placeholder="Mesajınızı yazın...",
+            key="chat"
+        )
+        
+        if user_message:
+            process_message(user_message)
 
 if __name__ == "__main__":
     main() 

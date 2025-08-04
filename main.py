@@ -24,7 +24,9 @@ def main():
     backend_thread.daemon = True
     backend_thread.start()
     
-    time.sleep(2)
+    print("🚀 Starting backend services...")
+    time.sleep(5)
+    print("✅ Backend should be ready!")
     
     run_frontend()
     

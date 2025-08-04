@@ -176,16 +176,42 @@ class VectorStore:
         self._ensure_initialized()
         
         try:
-            count = self.collection.count()
+            # Get total chunk count
+            total_chunks = self.collection.count()
+            
+            # Get all unique filenames to count documents
+            if total_chunks > 0:
+                # Query all records to get unique filenames
+                all_results = self.collection.get(
+                    include=['metadatas']
+                )
+                
+                # Count unique documents based on filename
+                unique_filenames = set()
+                if all_results['metadatas']:
+                    for metadata in all_results['metadatas']:
+                        filename = metadata.get('filename', 'unknown')
+                        unique_filenames.add(filename)
+                
+                document_count = len(unique_filenames)
+            else:
+                document_count = 0
+            
             return {
                 'collection_name': self.collection_name,
-                'document_count': count,
+                'document_count': document_count,
+                'total_chunks': total_chunks,
                 'db_path': self.db_path
             }
             
         except Exception as e:
             self.logger.error(f"Failed to get collection stats: {e}")
-            return {}
+            return {
+                'collection_name': self.collection_name,
+                'document_count': 0,
+                'total_chunks': 0,
+                'db_path': self.db_path
+            }
     
     def reset_collection(self) -> bool:
         """Reset (clear) the entire collection"""
@@ -247,8 +273,9 @@ class VectorStore:
         ids = results['ids'][0]
         
         for i, doc_id in enumerate(ids):
-            # Convert distance to similarity score 
-            similarity_score = max(0.0, 1.0 - distances[i])
+            # Convert ChromaDB cosine distance to similarity score
+            # ChromaDB cosine distance ranges from 0 to 2, where 0 is perfect match
+            similarity_score = max(0.0, 1.0 - (distances[i] / 2.0))
             
             search_result = SearchResult(
                 content=documents[i],
